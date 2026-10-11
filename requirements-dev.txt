@@ -1,0 +1,4 @@
+-r training_coach/requirements.txt
+pytest
+pytest-asyncio
+respx

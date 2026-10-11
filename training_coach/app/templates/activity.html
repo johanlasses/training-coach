@@ -1,0 +1,55 @@
+{% extends "base.html" %}
+{% from "_macros.html" import ride_type, spark %}
+{% set page = 'home' %}
+{% block content %}
+<p><a href="{{ base }}/">← Overview</a></p>
+<h2 style="margin:0">{{ a.name }}</h2>
+<p class="muted">{{ ride_type(a) }} · {{ a.start_date_local[:10] }} {{ a.start_date_local[11:16] }} ·
+  <a href="https://www.strava.com/activities/{{ a.id }}" target="_blank" rel="noopener">Open on Strava</a></p>
+
+<div class="tiles">
+  <div class="tile"><div class="label">Distance</div><div class="value">{{ ((a.distance or 0) / 1000) | round(1) }} <small>km</small></div></div>
+  <div class="tile"><div class="label">Moving time</div><div class="value">{{ a.moving_time | duration }}</div></div>
+  <div class="tile"><div class="label">Elevation</div><div class="value">{{ (a.elevation_gain or 0) | round | int }} <small>m</small></div></div>
+  {% if a.np %}<div class="tile"><div class="label">Normalized power</div><div class="value">{{ a.np | round | int }} <small>W</small></div>
+    <div class="sub">avg {{ (a.avg_watts or 0) | round | int }} W · max {{ (a.max_watts or 0) | round | int }} W</div></div>{% endif %}
+  <div class="tile"><div class="label">TSS</div><div class="value">{{ (a.tss or 0) | round | int }}</div>
+    <div class="sub">{% if a.intensity %}IF {{ '%.2f' % a.intensity }} · {% endif %}from {{ a.tss_source }} · FTP {{ a.ftp_used | round | int }} W</div></div>
+  {% if a.avg_hr %}<div class="tile"><div class="label">Heart rate</div><div class="value">{{ a.avg_hr | round | int }} <small>bpm</small></div>
+    <div class="sub">max {{ (a.max_hr or 0) | round | int }}</div></div>{% endif %}
+  {% if a.decoupling is not none %}<div class="tile"><div class="label">Pw:HR decoupling</div><div class="value">{{ a.decoupling }}<small>%</small></div>
+    <div class="sub">{{ 'well coupled (< 5%)' if a.decoupling < 5 else 'aerobic drift — durability limiter' }}</div></div>{% endif %}
+  {% if a.kilojoules %}<div class="tile"><div class="label">Work</div><div class="value">{{ a.kilojoules | round | int }} <small>kJ</small></div></div>{% endif %}
+</div>
+
+{% if a.spark_watts or a.spark_hr %}
+<div class="card"><h2>{{ 'Power' if a.spark_watts else 'Heart rate' }} over the ride</h2>
+  {{ spark(a.spark_watts or a.spark_hr, 'profile', 'tall') }}</div>
+{% endif %}
+
+{% if a.mmp %}
+<div class="card">
+  <h2>Power curve</h2>
+  <p class="caption">This ride against your best efforts in the 90 days up to it.</p>
+  <div class="chart-box"><canvas id="c-curve"></canvas></div>
+  <script type="application/json" data-chart="curve" data-target="c-curve">{{ {'series': [{'label': 'This ride', 'points': a.mmp}, {'label': 'Best, 90 days', 'points': curve90}]} | tojson }}</script>
+</div>
+{% endif %}
+
+{% if zones %}
+<div class="card">
+  <h2>Time in zones</h2>
+  <p class="caption">Based on FTP {{ a.ftp_used | round | int }} W.</p>
+  {% set zmax = (zones | map(attribute=1) | max) or 1 %}
+  <table class="zones">
+  {% for name, secs in zones %}
+    <tr><td style="width:130px">{{ name }}</td>
+        <td><div class="zbar" data-zone="{{ loop.index0 }}" style="width: {{ (secs / zmax * 100) | round(1) }}%"></div></td>
+        <td style="width:70px; text-align:right">{{ secs | duration }}</td></tr>
+  {% endfor %}
+  </table>
+</div>
+{% elif not a.streams_fetched %}
+<p class="muted">Power and heart-rate detail for this ride is still being fetched from Strava.</p>
+{% endif %}
+{% endblock %}

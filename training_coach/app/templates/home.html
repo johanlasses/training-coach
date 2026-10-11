@@ -1,0 +1,104 @@
+{% extends "base.html" %}
+{% from "_macros.html" import ride_type, spark, form_status %}
+{% set page = 'home' %}
+{% block content %}
+
+{% if session %}
+<div class="notice"><b>Today:</b> {{ session.title }} · {{ session.duration_min }} min ·
+  <a href="{{ base }}/plan">see plan</a></div>
+{% endif %}
+
+<div class="tiles">
+  <div class="tile"><div class="label">FTP</div>
+    <div class="value">{{ d.ftp }} <small>W</small></div>
+    <div class="sub">{{ d.wkg }} W/kg · {{ {'eftp': 'estimated', 'override': 'set manually', 'default': 'default, no power data'}[d.ftp_source] }}</div></div>
+  <div class="tile"><div class="label">Fitness · CTL</div><div class="value">{{ d.ctl | round | int }}</div>
+    <div class="sub">42-day load</div></div>
+  <div class="tile"><div class="label">Fatigue · ATL</div><div class="value">{{ d.atl | round | int }}</div>
+    <div class="sub">7-day load</div></div>
+  <div class="tile"><div class="label">Form · TSB</div><div class="value">{{ '%+d' % (d.tsb | round | int) }}</div>
+    <div class="sub">{{ form_status(d.tsb) }}</div></div>
+  <div class="tile"><div class="label">This week</div><div class="value">{{ d.this_week.hours }} <small>h</small></div>
+    <div class="sub">{{ d.this_week.km }} km · {{ d.this_week.rides }} rides · TSS {{ d.this_week.tss }}</div></div>
+  <div class="tile"><div class="label">Last 7 days</div><div class="value">{{ d.last7.rides }} <small>rides</small></div>
+    <div class="sub">{{ d.last7.hours }} h · {{ d.last7.km }} km</div></div>
+  <div class="tile"><div class="label">Last 30 days</div><div class="value">{{ d.last30.rides }} <small>rides</small></div>
+    <div class="sub">{{ d.last30.hours }} h · {{ d.last30.km }} km · {{ d.last30.indoor_rides }} indoor</div></div>
+  <div class="tile"><div class="label">Year to date</div><div class="value">{{ '{:,}'.format(d.ytd.km).replace(',', ' ') }} <small>km</small></div>
+    <div class="sub">{{ d.ytd.hours }} h · {{ d.ytd.rides }} rides · {{ '{:,}'.format(d.ytd.elevation).replace(',', ' ') }} m</div></div>
+</div>
+
+<div class="layout">
+  <section>
+    <div class="card">
+      <h2>Fitness and fatigue</h2>
+      <p class="caption">Training load, last 90 days. Fitness rising steadily is the goal; fatigue spikes are hard weeks.</p>
+      <div class="chart-box"><canvas id="c-fitness"></canvas></div>
+      <script type="application/json" data-chart="fitness" data-target="c-fitness">{{ d.fitness | tojson }}</script>
+    </div>
+    <div class="card">
+      <h2>Form (TSB)</h2>
+      <p class="caption">Fitness minus fatigue going into each day. Above zero: fresh. −10 to −30: productive training. Below −30: back off.</p>
+      <div class="chart-box short"><canvas id="c-form"></canvas></div>
+      <script type="application/json" data-chart="form" data-target="c-form">{{ d.fitness | tojson }}</script>
+    </div>
+    <div class="card">
+      <h2>Weekly hours</h2>
+      <p class="caption">Last 12 weeks.</p>
+      <div class="chart-box"><canvas id="c-weekly"></canvas></div>
+      <script type="application/json" data-chart="weekly" data-target="c-weekly">{{ d.weekly | tojson }}</script>
+      <details class="data"><summary>Show data</summary>
+        <table><tr><th>Week</th><th>Rides</th><th>Hours</th><th>Km</th><th>TSS</th><th>Indoor h</th></tr>
+        {% for w in d.weekly %}<tr><td>{{ w.week }}</td><td>{{ w.rides }}</td><td>{{ w.hours }}</td><td>{{ w.km }}</td><td>{{ w.tss }}</td><td>{{ w.indoor_hours }}</td></tr>{% endfor %}
+        </table></details>
+    </div>
+    {% if d.curve90 or d.curve365 %}
+    <div class="card">
+      <h2>Power curve</h2>
+      <p class="caption">Best average power per duration. Where the 90-day line sags below the 365-day line is fitness you've lost.</p>
+      <div class="chart-box"><canvas id="c-curve"></canvas></div>
+      <script type="application/json" data-chart="curve" data-target="c-curve">{{ {'series': [{'label': 'Last 90 days', 'points': d.curve90}, {'label': 'Last 365 days', 'points': d.curve365}]} | tojson }}</script>
+    </div>
+    {% endif %}
+    {% set ztotal = d.zones28 | sum(attribute='hours') %}
+    {% if ztotal %}
+    <div class="card">
+      <h2>Time in power zones</h2>
+      <p class="caption">Last 28 days, rides with power.</p>
+      {% set zmax = (d.zones28 | map(attribute='hours') | max) or 1 %}
+      <table class="zones">
+      {% for z in d.zones28 %}
+        <tr><td style="width:130px">{{ z.zone }}</td>
+            <td><div class="zbar" data-zone="{{ loop.index0 }}" style="width: {{ (z.hours / zmax * 100) | round(1) }}%"></div></td>
+            <td style="width:90px; text-align:right">{{ z.hours }} h · {{ z.pct }}%</td></tr>
+      {% endfor %}
+      </table>
+    </div>
+    {% endif %}
+  </section>
+
+  <section>
+    <h2 style="font-size:15px; margin: 0 0 12px">Recent rides</h2>
+    {% for a in feed %}
+    <a class="feed-item" href="{{ base }}/activity/{{ a.id }}">
+      <div class="feed-head">
+        <span class="feed-title">{{ a.name }}</span>
+        <span class="feed-meta">{{ ride_type(a) }}</span>
+      </div>
+      <div class="feed-meta">{{ a.start_date_local[:10] }} {{ a.start_date_local[11:16] }}</div>
+      <div class="feed-stats">
+        <div><b>{{ ((a.distance or 0) / 1000) | round(1) }} km</b>Distance</div>
+        <div><b>{{ a.moving_time | duration }}</b>Time</div>
+        {% if a.elevation_gain %}<div><b>{{ a.elevation_gain | round | int }} m</b>Elevation</div>{% endif %}
+        {% if a.np %}<div><b>{{ a.np | round | int }} W</b>NP</div>{% elif a.avg_watts %}<div><b>{{ a.avg_watts | round | int }} W</b>Avg power</div>{% endif %}
+        {% if a.tss %}<div><b>{{ a.tss | round | int }}</b>TSS{% if a.tss_source != 'power' %} ({{ a.tss_source }}){% endif %}</div>{% endif %}
+        {% if a.avg_hr %}<div><b>{{ a.avg_hr | round | int }}</b>Avg HR</div>{% endif %}
+      </div>
+      {{ spark(a.spark_watts or a.spark_hr, 'Power over the ride' if a.spark_watts else 'Heart rate over the ride') }}
+    </a>
+    {% else %}
+    <p class="muted">No rides yet. Once Strava is configured, the first sync pulls the last 12 months.</p>
+    {% endfor %}
+  </section>
+</div>
+{% endblock %}

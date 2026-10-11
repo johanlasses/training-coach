@@ -1,0 +1,106 @@
+{% extends "base.html" %}
+{% set page = 'settings' %}
+{% block content %}
+<div class="settings">
+
+<section class="card">
+  <h2>Claude (AI coach and analysis)</h2>
+  <p class="caption">Create a key at <a href="https://console.anthropic.com/settings/keys" target="_blank" rel="noopener">console.anthropic.com</a>.
+    A weekly plan plus a weekly analysis costs roughly a few dollars a month.</p>
+  <form method="post" action="{{ base }}/settings">
+    <label>API key
+      <input type="password" name="anthropic_api_key" autocomplete="off"
+             placeholder="{{ '•••••••• stored — leave blank to keep' if has_secret.anthropic_api_key else 'sk-ant-…' }}">
+    </label>
+    <div class="row">
+      <button>Save and verify</button>
+      {% if has_secret.anthropic_api_key %}
+      <label class="inline"><input type="checkbox" name="clear_anthropic_api_key" value="1"> Remove stored key</label>
+      {% endif %}
+    </div>
+  </form>
+</section>
+
+<section class="card">
+  <h2>Strava</h2>
+  {% if athlete and strava_ok %}
+    <p>✓ Connected as <b>{{ athlete.firstname }} {{ athlete.lastname }}</b>.</p>
+    <form method="post" action="{{ base }}/settings/strava/disconnect"><button class="secondary">Disconnect</button></form>
+  {% else %}
+  <ol class="steps-list">
+    <li>
+      <p>Create an API application at <a href="https://www.strava.com/settings/api" target="_blank" rel="noopener">strava.com/settings/api</a>.
+        Set <b>Authorization Callback Domain</b> to <code>localhost</code>. Any name, website and icon will do.</p>
+      <form method="post" action="{{ base }}/settings">
+        <div class="grid2">
+          <label>Client ID <input name="strava_client_id" value="{{ cfg.strava_client_id }}" inputmode="numeric"></label>
+          <label>Client secret <input type="password" name="strava_client_secret" autocomplete="off"
+                 placeholder="{{ '•••••••• stored — leave blank to keep' if has_secret.strava_client_secret else '' }}"></label>
+        </div>
+        <button>Save</button>
+      </form>
+    </li>
+    <li class="{{ 'disabled' if not strava_app }}">
+      <p>Approve access on Strava. Tick every box.</p>
+      {% if authorize_url %}<a class="btn" href="{{ authorize_url }}" target="_blank" rel="noopener">Connect with Strava</a>
+      {% else %}<button disabled>Connect with Strava</button>{% endif %}
+    </li>
+    <li class="{{ 'disabled' if not strava_app }}">
+      <p>Strava then sends you to a page that <b>won't load</b> (<code>{{ redirect_uri }}?…</code>). That's expected:
+        copy the full address from the browser's address bar and paste it here.</p>
+      <form method="post" action="{{ base }}/settings/strava/connect" class="row">
+        <input name="redirect_url" placeholder="{{ redirect_uri }}?state=&code=…&scope=…" {{ 'disabled' if not strava_app }} required>
+        <button {{ 'disabled' if not strava_app }}>Finish connecting</button>
+      </form>
+    </li>
+  </ol>
+  {% endif %}
+</section>
+
+<form method="post" action="{{ base }}/settings">
+<section class="card">
+  <h2>Athlete</h2>
+  <div class="grid3">
+    <label>Weight (kg) <input name="weight_kg" value="{{ cfg.weight_kg }}" inputmode="decimal"></label>
+    <label>FTP override (W) <input name="ftp_override" value="{{ cfg.ftp_override or '' }}" inputmode="numeric" placeholder="estimate from rides">
+      <small>Leave empty to use the eFTP estimated from your best efforts.</small></label>
+    <label>Threshold heart rate (bpm) <input name="lthr" value="{{ cfg.lthr }}" inputmode="numeric">
+      <small>Used for load on rides without power.</small></label>
+  </div>
+</section>
+
+<section class="card">
+  <h2>Availability</h2>
+  <p class="caption">The coach never plans outside these limits.</p>
+  <input type="hidden" name="availability" value="1">
+  <div class="days">
+    {% for d in weekdays %}
+    <label class="inline"><input type="checkbox" name="available_days" value="{{ d }}" {{ 'checked' if d in cfg.available_days }}> {{ d | capitalize }}</label>
+    {% endfor %}
+  </div>
+  <div class="grid3">
+    <label>Max minutes, weekdays <input name="max_weekday_minutes" value="{{ cfg.max_weekday_minutes }}" inputmode="numeric"></label>
+    <label>Max minutes, weekends <input name="max_weekend_minutes" value="{{ cfg.max_weekend_minutes }}" inputmode="numeric"></label>
+  </div>
+</section>
+
+<section class="card">
+  <h2>Weather and notifications</h2>
+  <p class="caption">Outdoor rides are only planned on days the forecast meets all three limits.</p>
+  <div class="grid3">
+    <label>Weather entity <input name="weather_entity" value="{{ cfg.weather_entity }}"></label>
+    <label>Notify service <input name="notify_service" value="{{ cfg.notify_service }}" placeholder="notify.mobile_app_…">
+      <small>Morning push with the day's session. Empty to disable.</small></label>
+    <span></span>
+    <label>Min temperature (°C) <input name="rideable_min_temp_c" value="{{ cfg.rideable_min_temp_c }}" inputmode="decimal"></label>
+    <label>Max wind (m/s) <input name="rideable_max_wind_ms" value="{{ cfg.rideable_max_wind_ms }}" inputmode="decimal"></label>
+    <label>Max rain (mm/day) <input name="rideable_max_precip_mm" value="{{ cfg.rideable_max_precip_mm }}" inputmode="decimal"></label>
+  </div>
+</section>
+<button>Save settings</button>
+</form>
+
+<p class="muted" style="font-size:13px; margin-top:24px">Keys and tokens are stored in this add-on's private data folder and are
+  included in Home Assistant backups. They are never shown again after saving.</p>
+</div>
+{% endblock %}

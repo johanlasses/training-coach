@@ -1,0 +1,80 @@
+{% extends "base.html" %}
+{% from "_macros.html" import status_pill %}
+{% set page = 'plan' %}
+{% block content %}
+<div style="display:flex; align-items:center; gap:12px; flex-wrap:wrap; margin-bottom:16px">
+  <a class="btn secondary" href="{{ base }}/plan?week={{ prev.isoformat() }}">←</a>
+  <h2 style="margin:0; font-size:18px">Week of {{ week.strftime('%-d %b %Y') }}</h2>
+  <a class="btn secondary" href="{{ base }}/plan?week={{ next.isoformat() }}">→</a>
+  <form method="post" action="{{ base }}/plan?week={{ week.isoformat() }}" style="margin-left:auto">
+    {% set planning = jobs.plan and jobs.plan.running %}
+    <button {{ 'disabled' if not ai_ok or planning }}>
+      {% if planning %}Coach is planning…{% elif plan %}Re-plan remaining days{% else %}Generate plan{% endif %}</button>
+  </form>
+</div>
+
+{% if not ai_ok %}<div class="notice error">Add your Claude API key in <a href="{{ base }}/settings">Settings</a> to enable the coach.</div>{% endif %}
+
+{% if plan %}
+{% set p = plan.payload %}
+<div class="card">
+  <h2>{{ p.week_focus }}</h2>
+  <p class="caption">Block week {{ p.block_week }} of 4{{ ' · recovery' if p.block_week == 4 }} ·
+    planned TSS {{ p.days | sum(attribute='target_tss') }} · generated {{ plan.created_at | replace('T', ' ') }}</p>
+  <p style="margin:0">{{ p.rationale }}</p>
+  {% if plan.warnings %}
+  <div class="notice error" style="margin:12px 0 0"><b>The plan still breaks some rules — use judgement:</b>
+    <ul style="margin:4px 0 0">{% for w in plan.warnings %}<li>{{ w }}</li>{% endfor %}</ul></div>
+  {% endif %}
+</div>
+
+<div class="week">
+{% for d in p.days %}
+  {% set dd = d.date %}
+  <div class="day {{ 'today' if dd == today }}">
+    <div>
+      <div class="date">{{ week.fromisoformat(dd).strftime('%a %-d %b') }}</div>
+      <div class="facts">{% if d.kind != 'rest' %}{{ d.duration_min }} min · TSS {{ d.target_tss }}{% endif %}</div>
+      <div style="margin-top:6px">{{ status_pill(status[dd]) }}</div>
+    </div>
+    <div>
+      <h3>{{ d.title }}</h3>
+      <div class="facts">{{ {'zwift': 'Zwift', 'outdoor': 'Outdoor · ' ~ d.bike, 'rest': 'Rest'}[d.kind] }} · {{ d.intensity }}</div>
+      <p style="margin:6px 0 0">{{ d.description }}</p>
+      {% if d.kind == 'outdoor' %}
+        {% if d.terrain %}<p class="facts" style="margin:6px 0 0"><b>Terrain:</b> {{ d.terrain }}</p>{% endif %}
+        {% if d.weather_note %}<p class="facts" style="margin:2px 0 0"><b>Weather:</b> {{ d.weather_note }}</p>{% endif %}
+      {% endif %}
+      {% if d.steps %}
+        {{ workout_svg(d.steps) | safe }}
+        <details><summary class="facts">Steps</summary>
+        <ol class="steps">
+        {% for s in d.steps %}
+          <li>{% if s.type == 'intervals' %}{{ s.repeat }} × {{ s.on_s | dur_label }} @ {{ (s.on_power * 100) | round | int }}% / {{ s.off_s | dur_label }} @ {{ (s.off_power * 100) | round | int }}%
+              {% elif s.type == 'freeride' %}{{ s.duration_s | dur_label }} free ride
+              {% elif s.power_low != s.power_high %}{{ s.duration_s | dur_label }} {{ s.type }} {{ (s.power_low * 100) | round | int }}→{{ (s.power_high * 100) | round | int }}%
+              {% else %}{{ s.duration_s | dur_label }} @ {{ (s.power_low * 100) | round | int }}%{% endif %}
+              {% if s.cadence %} · {{ s.cadence }} rpm{% endif %}{% if s.text %} — {{ s.text }}{% endif %}</li>
+        {% endfor %}
+        </ol></details>
+      {% endif %}
+      {% for a in by_day.get(dd, []) %}
+        <p class="facts" style="margin:6px 0 0">Ridden: <a href="{{ base }}/activity/{{ a.id }}">{{ a.name }}</a> ·
+          {{ a.moving_time | duration }} · TSS {{ (a.tss or 0) | round | int }}</p>
+      {% endfor %}
+    </div>
+    <div>
+      {% if d.kind == 'zwift' %}
+        <a class="btn" href="{{ base }}/plan/{{ plan.id }}/{{ dd }}.zwo">Download .zwo</a>
+        <p class="facts">Save to <code>Documents/Zwift/Workouts/&lt;your id&gt;/</code></p>
+      {% endif %}
+    </div>
+  </div>
+{% endfor %}
+</div>
+{% else %}
+<div class="card"><p style="margin:0">No plan for this week yet.
+  {% if ai_ok %}Generate one — the coach plans from today through Sunday using your load, power curve, the {{ 'forecast' }} and your availability.{% endif %}
+  New plans are generated automatically every Sunday at 18:00 for the coming week.</p></div>
+{% endif %}
+{% endblock %}

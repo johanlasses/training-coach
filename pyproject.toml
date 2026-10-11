@@ -1,0 +1,4 @@
+[tool.pytest.ini_options]
+pythonpath = ["training_coach"]
+testpaths = ["tests"]
+asyncio_mode = "auto"

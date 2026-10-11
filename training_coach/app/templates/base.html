@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  {% set busy = jobs.values() | selectattr("running") | list %}
+  {% if busy %}<meta http-equiv="refresh" content="5">{% endif %}
+  <title>Training Coach</title>
+  <link rel="stylesheet" href="{{ base }}/static/app.css">
+</head>
+<body>
+<header>
+  <h1>Training Coach</h1>
+  <nav>
+    <a href="{{ base }}/" class="{{ 'active' if page == 'home' }}">Overview</a>
+    <a href="{{ base }}/plan" class="{{ 'active' if page == 'plan' }}">Plan</a>
+    <a href="{{ base }}/analysis" class="{{ 'active' if page == 'analysis' }}">Analysis</a>
+    <a href="{{ base }}/settings" class="{{ 'active' if page == 'settings' }}">Settings</a>
+  </nav>
+  <div class="status">
+    {% if jobs.sync and jobs.sync.running %}<span>Syncing…</span>
+    {% elif last_sync %}<span title="{{ last_sync.listed }} rides listed, {{ last_sync.pending_streams }} awaiting power data">
+      Synced {{ last_sync.at[:16] | replace('T', ' ') }} UTC{% if last_sync.pending_streams %} · {{ last_sync.pending_streams }} rides still loading{% endif %}</span>
+    {% endif %}
+    <form method="post" action="{{ base }}/sync"><button class="secondary" {{ 'disabled' if not strava_ok or (jobs.sync and jobs.sync.running) }}>Sync now</button></form>
+  </div>
+</header>
+<main>
+  {% if flash %}<div class="notice {{ 'error' if flash[0] == 'error' }}">{{ flash[1] }}</div>{% endif %}
+  {% if not strava_ok and page != 'settings' %}
+  <div class="notice error">Strava is not connected. <a href="{{ base }}/settings">Connect it in Settings</a>.</div>
+  {% endif %}
+  {% for name, job in jobs.items() if job.error %}
+  <div class="notice error"><b>{{ name | capitalize }} failed:</b> {{ job.error }}</div>
+  {% endfor %}
+  {% block content %}{% endblock %}
+</main>
+<script src="{{ base }}/static/vendor/chart.umd.min.js"></script>
+<script src="{{ base }}/static/charts.js"></script>
+</body>
+</html>
