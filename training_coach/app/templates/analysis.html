@@ -1,11 +1,14 @@
 {% extends "base.html" %}
 {% set page = 'analysis' %}
 {% block content %}
-<div class="layout" style="grid-template-columns: minmax(0, 1fr) 240px">
+<div class="layout layout-aside">
   <section>
-    <div style="display:flex; align-items:center; gap:12px; margin-bottom:16px">
-      <h2 style="margin:0; font-size:18px">{% if a %}Analysis · {{ a.created_at[:16] | replace('T', ' ') }}{% else %}Analysis{% endif %}</h2>
-      <form method="post" action="{{ base }}/analysis" style="margin-left:auto">
+    <div class="page-head">
+      <div>
+        <h2>Analysis</h2>
+        {% if a %}<div class="muted">{{ a.created_at[:16] | replace('T', ' ') }} · {{ a.kind }}</div>{% endif %}
+      </div>
+      <form method="post" action="{{ base }}/analysis">
         {% set running = jobs.analysis and jobs.analysis.running %}
         <button {{ 'disabled' if not ai_ok or running }}>{{ 'Analysing…' if running else 'Analyse now' }}</button>
       </form>
@@ -13,7 +16,7 @@
     {% if not ai_ok %}<div class="notice error">Add your Claude API key in <a href="{{ base }}/settings">Settings</a> to enable analysis.</div>{% endif %}
     {% if a %}
       <div class="report">{{ html | safe }}</div>
-      <p class="muted" style="font-size:13px">{{ a.kind | capitalize }} report · {{ a.model }}</p>
+      <p class="muted" style="font-size:13px">Written by {{ a.model }}</p>
     {% else %}
       <div class="card"><p style="margin:0">No analysis yet. A weekly report is written every Monday at 06:00, or run one now.</p></div>
     {% endif %}

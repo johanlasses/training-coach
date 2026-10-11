@@ -70,7 +70,11 @@ button:disabled { opacity: .5; cursor: default; }
 .secondary-text { color: var(--text-secondary); }
 
 .layout { display: grid; grid-template-columns: minmax(0, 1fr) 420px; gap: 24px; }
-@media (max-width: 1000px) { .layout { grid-template-columns: 1fr; } }
+.layout-aside { grid-template-columns: minmax(0, 1fr) 240px; }
+@media (max-width: 1000px) { .layout, .layout-aside { grid-template-columns: 1fr; } }
+.page-head { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 16px; }
+.page-head h2 { margin: 0; font-size: 18px; }
+.page-head form { margin-left: auto; }
 
 .tiles { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; margin-bottom: 24px; }
 @media (max-width: 700px) { .tiles { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
@@ -149,3 +153,17 @@ table.zones td { padding: 3px 6px 3px 0; }
 .steps-list li.disabled { opacity: .55; }
 .steps-list p { margin: 0 0 8px; }
 button, .btn { white-space: nowrap; }
+
+/* Phones */
+@media (max-width: 700px) {
+  header { padding: 10px 16px 0; gap: 4px 12px; }
+  header h1 { font-size: 16px; }
+  .status { order: 2; }
+  .status > span { display: none; }  /* sync time doesn't fit; the button stays */
+  nav { order: 3; width: 100%; display: flex; overflow-x: auto; white-space: nowrap; }
+  nav a { padding: 8px 0; }
+  main { padding: 16px; }
+  .report { padding: 4px 16px 12px; }
+  .report ul, .report ol { padding-left: 20px; }
+  .history { border-top: 1px solid var(--border); padding-top: 12px; }
+}
