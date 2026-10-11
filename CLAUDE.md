@@ -1,0 +1,40 @@
+# Training Coach
+
+A Home Assistant add-on (FastAPI + Jinja, served through HA ingress) for one road and gravel cyclist.
+It covers Strava sync, load metrics, a Claude-planned week with Zwift `.zwo` export, and a weekly AI analysis.
+See README.md for the architecture and `training_coach/DOCS.md` for the user-facing setup.
+
+## Commands
+
+```bash
+.venv/bin/python -m pytest -q                                   # full suite, a few seconds
+TC_DATA_DIR=/tmp/tc-demo .venv/bin/python tools/seed_demo.py    # demo data, no Strava needed
+(cd training_coach && TC_DATA_DIR=/tmp/tc-demo ../.venv/bin/python -m uvicorn app.main:app --port 8099)
+.venv/bin/python tools/mobile_check.py                          # iPhone-size overflow check + screenshots
+```
+
+A project hook re-runs pytest after every edit under `training_coach/app/` or `tests/` and reports failures.
+
+## Rules
+
+- **Bump `version` in `training_coach/config.yaml` on every release.** HA won't offer the update otherwise. Use `/release-addon`.
+- **Push with the personal GitHub account.** The shell's `GITHUB_TOKEN` is the ABB work account, which gets a 403 on
+  `johanlasses/training-coach`. `/release-addon` has the one-off credential command. Never persist it.
+- **The user is on an iPhone.** Any template or CSS change must pass the `check-mobile` skill before it's done.
+  Don't use inline `style="grid-template-columns…"`, because it overrides the responsive media queries.
+- **Settings live in the DB, not in the add-on options.** The in-app Settings page (`/settings`) is the only place for
+  credentials and preferences, and `training_coach/config.yaml` has no `options:`. New settings go in `app/config.py` (`Config`) plus
+  `templates/settings.html`. Never render secret values back into HTML.
+- **Ingress:** every URL in templates and redirects must be prefixed with `{{ base }}` / `back(request, …)`.
+- **Anthropic SDK 1.x uses httpx2.** respx can't mock it. Inject `httpx2.MockTransport` (see `tests/test_llm.py`).
+  Model `claude-opus-5-5`, adaptive thinking, `fallbacks="default"` with beta `server-side-fallback-2026-07-01`.
+- **Strava rate limits:** stream fetches are capped per sync run and stop near the 15-minute limit. Keep it that way.
+  Tests never hit real APIs.
+- **Charts:** use the colour tokens in `static/app.css` (the dataviz reference palette). No dual axes; TSB has its own chart.
+- After changing `metrics.py`, `coach.py` rules or prompts, or `analysis.py`, run the `training-science-reviewer` agent.
+
+## MCP servers (`.mcp.json`)
+
+- `home-assistant`: HA's own MCP server. Needs `HA_TOKEN` (a long-lived token) exported in the shell; `HA_URL` defaults
+  to `http://192.168.68.155:8123`. Use it to check `sensor.training_*` entities and notifications.
+- `playwright`: interactive browser via the installed Chrome. For layout checks, prefer `tools/mobile_check.py`.

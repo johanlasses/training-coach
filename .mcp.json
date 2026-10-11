@@ -1,0 +1,15 @@
+{
+  "mcpServers": {
+    "home-assistant": {
+      "type": "http",
+      "url": "${HA_URL:-http://192.168.68.155:8123}/api/mcp",
+      "headers": {
+        "Authorization": "Bearer ${HA_TOKEN}"
+      }
+    },
+    "playwright": {
+      "command": "npx",
+      "args": ["-y", "@playwright/mcp@latest", "--browser", "chrome"]
+    }
+  }
+}

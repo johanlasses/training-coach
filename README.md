@@ -34,3 +34,12 @@ cd training_coach && TC_DATA_DIR=/tmp/tc-demo ../.venv/bin/python -m uvicorn app
 
 Optional for local runs: `ANTHROPIC_API_KEY`, `HA_URL` + `HA_TOKEN` (weather and notifications), and
 `MQTT_HOST`/`MQTT_USER`/`MQTT_PASSWORD` (sensors).
+
+Check the UI at iPhone size (needs the server above running; uses your installed Chrome):
+
+```bash
+uv pip install playwright
+.venv/bin/python tools/mobile_check.py            # all pages: overflow check + screenshots in .shots/
+```
+
+Release: `/release-addon` in Claude Code (tests, version bump, commit, push).
