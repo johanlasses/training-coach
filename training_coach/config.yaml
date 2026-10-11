@@ -1,5 +1,5 @@
 name: Training Coach
-version: "0.1.0"
+version: "0.1.1"
 slug: training_coach
 description: Strava-based training dashboard, AI coach and Zwift workout planner
 url: https://github.com/johanlasses/training-coach
