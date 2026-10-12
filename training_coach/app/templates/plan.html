@@ -7,11 +7,20 @@
   <h2 style="margin:0; font-size:18px">Week of {{ week.strftime('%-d %b %Y') }}</h2>
   <a class="btn secondary" href="{{ base }}/plan?week={{ next.isoformat() }}">→</a>
   <form method="post" action="{{ base }}/plan?week={{ week.isoformat() }}" style="margin-left:auto">
+    <input type="hidden" name="coach" value="{{ coach }}">
     {% set planning = jobs.plan and jobs.plan.running %}
     <button {{ 'disabled' if not ai_ok or planning }}>
-      {% if planning %}Coach is planning…{% elif plan %}Re-plan remaining days{% else %}Generate plan{% endif %}</button>
+      {% if planning %}Coach is planning…{% elif plan %}Re-plan remaining days{% else %}Generate with {{ coach | coach_name }}{% endif %}</button>
   </form>
 </div>
+
+<nav class="tabs" aria-label="Coach">
+  {% for k in tabs %}
+  <a href="{{ base }}/plan?week={{ week.isoformat() }}&coach={{ k }}" class="{{ 'active' if k == coach }} {{ 'empty' if not plans[k] }}"
+     {%- if plans[k] and plans[k].id == active_id %} title="Active plan"{% endif %}>{{ k | coach_short }}
+    {%- if plans[k] and plans[k].id == active_id %} ✓{% endif %}</a>
+  {% endfor %}
+</nav>
 
 {% if not ai_ok %}<div class="notice error">Add your Claude API key in <a href="{{ base }}/settings">Settings</a> to enable the coach.</div>{% endif %}
 
@@ -19,7 +28,11 @@
 {% set p = plan.payload %}
 <div class="card">
   <h2>{{ p.week_focus }}</h2>
-  <p class="caption">Block week {{ p.block_week }} of 4{{ ' · recovery' if p.block_week == 4 }} ·
+  {% if plan.id != active_id %}
+  <form method="post" action="{{ base }}/plan/{{ plan.id }}/activate" style="float:right; margin:0 0 8px 12px">
+    <button class="secondary">Use this plan</button></form>
+  {% endif %}
+  <p class="caption">{{ plan.coach | coach_name }}{{ ' · active plan' if plan.id == active_id }} · Block week {{ p.block_week }} of 4{{ ' · recovery' if p.block_week == 4 }} ·
     planned TSS {{ p.days | sum(attribute='target_tss') }} · generated {{ plan.created_at | replace('T', ' ') }}</p>
   <p style="margin:0">{{ p.rationale }}</p>
   {% if plan.warnings %}
@@ -64,16 +77,25 @@
     </div>
     <div>
       {% if d.kind == 'zwift' %}
+        {% set sent = zwift_uploads.get(plan.id ~ '/' ~ dd) %}
+        {% if zwift_ok and dd >= today %}
+        <form method="post" action="{{ base }}/plan/{{ plan.id }}/{{ dd }}/zwift" class="zwift-send">
+          <button class="{{ 'secondary' if sent }}">{{ 'Send again' if sent else 'Send to Zwift' }}</button></form>
+        {% if sent %}<p class="facts">✓ In Zwift since {{ sent | replace('T', ' ') }}</p>{% endif %}
+        <a class="btn secondary" href="{{ base }}/plan/{{ plan.id }}/{{ dd }}.zwo">Download .zwo</a>
+        {% else %}
         <a class="btn" href="{{ base }}/plan/{{ plan.id }}/{{ dd }}.zwo">Download .zwo</a>
-        <p class="facts">Save to <code>Documents/Zwift/Workouts/&lt;your id&gt;/</code></p>
+        <p class="facts">Save to <code>Documents/Zwift/Workouts/&lt;your id&gt;/</code>{% if not zwift_ok %}, or
+          <a href="{{ base }}/settings">connect Zwift</a> to send it directly{% endif %}</p>
+        {% endif %}
       {% endif %}
     </div>
   </div>
 {% endfor %}
 </div>
 {% else %}
-<div class="card"><p style="margin:0">No plan for this week yet.
-  {% if ai_ok %}Generate one — the coach plans from today through Sunday using your load, power curve, the season and your availability.{% endif %}
-  New plans are generated automatically every Sunday at 18:00 for the coming week.</p></div>
+<div class="card"><p style="margin:0">No plan from {{ coach | coach_name }} for this week yet.
+  {% if ai_ok %}Generate one: the coach plans from today through Sunday from your goals, load, power curve, the season and your availability.{% endif %}
+  {% if plans %}The first plan you generate for a week is the active one, and it drives today's session and notifications. Switch with “Use this plan”.{% endif %}</p></div>
 {% endif %}
 {% endblock %}

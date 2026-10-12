@@ -89,3 +89,18 @@ async def test_generate_plan_retries_with_errors(tmp_path, monkeypatch):
     assert stored["warnings"] == []
     assert [d["date"] for d in stored["payload"]["days"]] == DATES
     assert stored["payload"]["block_week"] == 1
+
+
+async def test_plan_prompt_uses_chosen_coach_and_athlete_goals(tmp_path, monkeypatch):
+    from app import stats
+    requests = mock_api(monkeypatch, sse(json.dumps(good_plan())))
+    cfg = Config(anthropic_api_key="k", goals="Ride Gravel Unbound 200 in June", athlete_level="advanced")
+    snapshot = stats.snapshot([], date(2026, 10, 11), cfg)
+    plan_id = await coach.generate_plan(DB(tmp_path / "t.db"), cfg, snapshot, date(2026, 10, 12),
+                                        date(2026, 10, 11), "carmichael")
+    body = json.loads(requests[0].content)
+    system = body["system"] if isinstance(body["system"], str) else body["system"][0]["text"]
+    assert "time-crunched" in system
+    assert "Ride Gravel Unbound 200 in June" in body["messages"][0]["content"]
+    assert '"self_rated_level": "advanced"' in body["messages"][0]["content"]
+    assert DB(tmp_path / "t.db").plan(plan_id)["coach"] == "carmichael"

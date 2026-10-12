@@ -4,6 +4,30 @@
 <div class="form-page">
 <form method="post" action="{{ base }}/profile">
 <section class="card">
+  <h2>Goals</h2>
+  <p class="caption">The coach plans and analyses toward this.</p>
+  <label>What are you training for? <textarea name="goals" rows="4" placeholder="E.g. ride a 160 km gravel event in June, climb faster, reach 4 W/kg…">{{ cfg.goals }}</textarea></label>
+  <div class="grid2">
+    <label>Level <select name="athlete_level">
+      {% for key, (name, hint) in levels.items() %}
+      <option value="{{ key }}" {{ 'selected' if key == cfg.athlete_level }}>{{ name }} · {{ hint }}</option>
+      {% endfor %}</select>
+      {% if suggested %}<small>Your {{ wkg }} W/kg suggests {{ levels[suggested][0] }}.</small>{% endif %}</label>
+    <label>Sessions per week <input name="sessions_per_week" value="{{ cfg.sessions_per_week }}" inputmode="numeric">
+      <small>A target. The coach may plan fewer in recovery weeks.</small></label>
+  </div>
+</section>
+
+<section class="card">
+  <h2>Default coach</h2>
+  <p class="caption">Preselected on Plan and Analysis. You can pick another coach there for any run.</p>
+  {% for c in coaches.values() %}
+  <label class="choice"><input type="radio" name="default_coach" value="{{ c.key }}" {{ 'checked' if c.key == cfg.default_coach }}>
+    <span>{{ c.name }}<small>{{ c.summary }}</small></span></label>
+  {% endfor %}
+</section>
+
+<section class="card">
   <h2>Athlete</h2>
   <div class="grid3">
     <label>Weight (kg) <input name="weight_kg" value="{{ cfg.weight_kg }}" inputmode="decimal"></label>

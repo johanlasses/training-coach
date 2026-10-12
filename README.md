@@ -3,7 +3,7 @@
 A Home Assistant add-on for road and gravel training. It pulls rides from Strava (Zwift rides arrive there
 automatically), shows a Strava-style feed with load and power statistics, and uses Claude to plan your week
 (Zwift workouts as `.zwo`, or outdoor rides when the season and daylight allow) and to write an in-depth
-weekly analysis.
+analysis, on demand, with a choice of three coaching styles.
 
 ## Install
 
@@ -16,7 +16,9 @@ Setup steps are in [training_coach/DOCS.md](training_coach/DOCS.md).
 - **Sync** (`app/strava.py`, `app/sync.py`): imports cycling activities and their power and HR streams. Only derived
   metrics are stored, not raw streams.
 - **Metrics** (`app/metrics.py`): NP, IF, TSS (hrTSS when there's no power), power curve, eFTP (95% of best 20 min or best 60 min over 90 days), CP/W′, CTL/ATL/TSB, Pw:HR decoupling.
-- **Coach** (`app/coach.py`): Claude returns a schema-constrained weekly plan. Code then checks availability, back-to-back hard days,
+- **Coaches** (`app/coaches.py`, `app/coaches/*.md`): three coaching styles. The markdown is appended to the plan and analysis
+  prompts. Per-coach style rules (back-to-back hard days, max hard sessions) feed the plan validator.
+- **Coach** (`app/coach.py`): Claude returns a schema-constrained weekly plan. Code then checks availability, hard-day rules,
   weekly TSS vs. ramp limits and workout step totals. A failing plan is retried once with the errors.
 - **Analysis** (`app/analysis.py`): a Markdown report built from a JSON snapshot of the athlete (`app/stats.py`).
 - **UI**: FastAPI and Jinja behind HA ingress, Chart.js (vendored), with no build step.

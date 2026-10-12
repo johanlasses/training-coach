@@ -4,7 +4,7 @@ from __future__ import annotations
 from datetime import date, timedelta
 
 from . import metrics, season
-from .config import Config
+from .config import Config, level_for_wkg
 from .sync import ftp_at
 
 
@@ -100,7 +100,11 @@ def snapshot(acts: list[dict], today: date, cfg: Config) -> dict:
         "weekday": today.strftime("%A"),
         "athlete": {"weight_kg": cfg.weight_kg, "ftp_w": d["ftp"], "ftp_source": d["ftp_source"],
                     "w_per_kg": d["wkg"], "lthr": cfg.lthr,
-                    "critical_power_w": cp[0] if cp else None, "w_prime_j": cp[1] if cp else None},
+                    "critical_power_w": cp[0] if cp else None, "w_prime_j": cp[1] if cp else None,
+                    "goals": cfg.goals.strip() or "Not stated; assume general fitness and FTP gain.",
+                    "self_rated_level": cfg.athlete_level,
+                    "level_suggested_by_w_per_kg": level_for_wkg(d["wkg"]),
+                    "target_sessions_per_week": cfg.sessions_per_week},
         "load": {"ctl": d["ctl"], "atl": d["atl"], "tsb": d["tsb"],
                  "ctl_4_weeks_ago": d["fitness"][-29]["ctl"] if len(d["fitness"]) >= 29 else None,
                  "ctl_ramp_per_week": round((d["ctl"] - d["fitness"][-8]["ctl"]), 1) if len(d["fitness"]) >= 8 else None},

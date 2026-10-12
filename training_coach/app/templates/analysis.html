@@ -6,10 +6,13 @@
     <div class="page-head">
       <div>
         <h2>Analysis</h2>
-        {% if a %}<div class="muted">{{ a.created_at[:16] | replace('T', ' ') }} · {{ a.kind }}</div>{% endif %}
+        {% if a %}<div class="muted">{{ a.coach | coach_name }} · {{ a.created_at[:16] | replace('T', ' ') }} · {{ a.kind }}</div>{% endif %}
       </div>
-      <form method="post" action="{{ base }}/analysis">
+      <form method="post" action="{{ base }}/analysis" class="coach-pick">
         {% set running = jobs.analysis and jobs.analysis.running %}
+        <select name="coach" aria-label="Coach">
+          {% for c in coaches.values() %}<option value="{{ c.key }}" {{ 'selected' if c.key == default_coach }}>{{ c.name }}</option>{% endfor %}
+        </select>
         <button {{ 'disabled' if not ai_ok or running }}>{{ 'Analysing…' if running else 'Analyse now' }}</button>
       </form>
     </div>
@@ -18,13 +21,13 @@
       <div class="report">{{ html | safe }}</div>
       <p class="muted" style="font-size:13px">Written by {{ a.model }}</p>
     {% else %}
-      <div class="card"><p style="margin:0">No analysis yet. A weekly report is written every Monday at 06:00, or run one now.</p></div>
+      <div class="card"><p style="margin:0">No analysis yet. Pick a coach and run one.</p></div>
     {% endif %}
   </section>
   <aside class="history">
     <h2 style="font-size:15px; margin:0 0 8px">History</h2>
     {% for h in history %}
-      <a href="{{ base }}/analysis?id={{ h.id }}" class="{{ 'active' if a and a.id == h.id }}">{{ h.created_at[:10] }} · {{ h.kind }}</a>
+      <a href="{{ base }}/analysis?id={{ h.id }}" class="{{ 'active' if a and a.id == h.id }}">{{ h.created_at[:10] }} · {{ h.coach | coach_name }}</a>
     {% else %}<p class="muted">—</p>{% endfor %}
   </aside>
 </div>

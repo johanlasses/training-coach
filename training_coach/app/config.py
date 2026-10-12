@@ -18,6 +18,19 @@ DATA_DIR = Path(os.environ.get("TC_DATA_DIR", "/data"))
 WEEKDAYS = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"]
 SECRETS = {"anthropic_api_key", "strava_client_secret"}
 
+# Athlete levels by FTP W/kg, with Zwift's classic categories as a reference. Zwift A starts at 4.0 W/kg,
+# but that's a strong amateur (Coggan's power profile puts domestic elite around 5 W/kg), not elite.
+LEVELS = {
+    "beginner": ("Beginner", "under 2.5 W/kg, Zwift D"),
+    "intermediate": ("Intermediate", "2.5–3.2 W/kg, Zwift C"),
+    "advanced": ("Advanced", "3.2–5.0 W/kg, Zwift B/A"),
+    "elite": ("Elite", "5.0+ W/kg, racing at elite level"),
+}
+
+
+def level_for_wkg(wkg: float) -> str:
+    return "beginner" if wkg < 2.5 else "intermediate" if wkg < 3.2 else "advanced" if wkg < 5.0 else "elite"
+
 
 @dataclass
 class Config:
@@ -31,6 +44,10 @@ class Config:
     max_weekday_minutes: int = 75
     max_weekend_minutes: int = 180
     notify_service: str = "notify.johan_iphone"
+    goals: str = ""
+    athlete_level: str = "intermediate"
+    sessions_per_week: int = 5
+    default_coach: str = "nextlevel"
 
     def max_minutes(self, weekday: int) -> int:
         """Max training minutes for a weekday (0=Mon); 0 when the day is unavailable."""

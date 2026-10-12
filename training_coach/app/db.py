@@ -49,14 +49,16 @@ CREATE TABLE IF NOT EXISTS plans (
     created_at TEXT,
     model TEXT,
     payload TEXT,             -- JSON plan
-    warnings TEXT             -- JSON list
+    warnings TEXT,            -- JSON list
+    coach TEXT                -- coaches.COACHES key; NULL for plans made before coaches existed
 );
 CREATE TABLE IF NOT EXISTS analyses (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     created_at TEXT,
     kind TEXT,                -- weekly | manual
     model TEXT,
-    markdown TEXT
+    markdown TEXT,
+    coach TEXT
 );
 """
 
@@ -73,6 +75,9 @@ class DB:
         self.conn = sqlite3.connect(str(path), check_same_thread=False)
         self.conn.row_factory = sqlite3.Row
         self.conn.executescript(SCHEMA)
+        for table in ("plans", "analyses"):  # added in 0.3.0
+            if "coach" not in {r["name"] for r in self.conn.execute(f"PRAGMA table_info({table})")}:
+                self.conn.execute(f"ALTER TABLE {table} ADD COLUMN coach TEXT")
         self.conn.commit()
 
     # --- kv -------------------------------------------------------------
@@ -140,12 +145,16 @@ class DB:
         return [_row(r) for r in rows]
 
     # --- plans / analyses -------------------------------------------------
-    def save_plan(self, week_start: str, created_at: str, model: str, payload: dict, warnings: list[str]) -> int:
+    def save_plan(self, week_start: str, created_at: str, model: str, payload: dict, warnings: list[str],
+                  coach: str | None = None) -> int:
+        """Stores a plan. The first plan for a week becomes its active plan."""
         cur = self.conn.execute(
-            "INSERT INTO plans(week_start, created_at, model, payload, warnings) VALUES(?,?,?,?,?)",
-            (week_start, created_at, model, json.dumps(payload), json.dumps(warnings)),
+            "INSERT INTO plans(week_start, created_at, model, payload, warnings, coach) VALUES(?,?,?,?,?,?)",
+            (week_start, created_at, model, json.dumps(payload), json.dumps(warnings), coach),
         )
         self.conn.commit()
+        if self.get(f"active_plan:{week_start}") is None:
+            self.set_active_plan(week_start, cur.lastrowid)
         return cur.lastrowid
 
     def latest_plan(self, week_start: str) -> dict | None:
@@ -154,21 +163,36 @@ class DB:
         ).fetchone()
         return _plan(r) if r else None
 
+    def week_plans(self, week_start: str) -> dict[str | None, dict]:
+        """The latest plan per coach for a week."""
+        rows = self.conn.execute(
+            "SELECT * FROM plans WHERE id IN (SELECT MAX(id) FROM plans WHERE week_start=? GROUP BY coach)",
+            (week_start,)).fetchall()
+        return {r["coach"]: _plan(r) for r in rows}
+
+    def active_plan(self, week_start: str) -> dict | None:
+        """The plan that drives today's session, compliance and notifications; else the latest one."""
+        plan_id = self.get(f"active_plan:{week_start}")
+        return (self.plan(plan_id) if plan_id else None) or self.latest_plan(week_start)
+
+    def set_active_plan(self, week_start: str, plan_id: int) -> None:
+        self.set(f"active_plan:{week_start}", plan_id)
+
     def plan(self, plan_id: int) -> dict | None:
         r = self.conn.execute("SELECT * FROM plans WHERE id=?", (plan_id,)).fetchone()
         return _plan(r) if r else None
 
-    def save_analysis(self, created_at: str, kind: str, model: str, markdown: str) -> int:
+    def save_analysis(self, created_at: str, kind: str, model: str, markdown: str, coach: str | None = None) -> int:
         cur = self.conn.execute(
-            "INSERT INTO analyses(created_at, kind, model, markdown) VALUES(?,?,?,?)",
-            (created_at, kind, model, markdown),
+            "INSERT INTO analyses(created_at, kind, model, markdown, coach) VALUES(?,?,?,?,?)",
+            (created_at, kind, model, markdown, coach),
         )
         self.conn.commit()
         return cur.lastrowid
 
     def analyses(self, limit: int = 20) -> list[dict]:
         rows = self.conn.execute(
-            "SELECT id, created_at, kind, model FROM analyses ORDER BY id DESC LIMIT ?", (limit,)
+            "SELECT id, created_at, kind, model, coach FROM analyses ORDER BY id DESC LIMIT ?", (limit,)
         ).fetchall()
         return [dict(r) for r in rows]
 

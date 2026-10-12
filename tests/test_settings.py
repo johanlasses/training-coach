@@ -79,3 +79,50 @@ def test_profile_save_keeps_secrets_and_recomputes(client):
     cfg = load_config(main.app.state.st.db)
     assert cfg.anthropic_api_key == "sk-good"
     assert cfg.weight_kg == 68 and cfg.ftp_override == 260
+
+
+def test_goals_level_sessions_and_coach(client):
+    r = client.post("/profile", data={"goals": "  Climb faster  ", "athlete_level": "advanced",
+                                      "sessions_per_week": "4", "default_coach": "pogacar"})
+    assert "Profile saved." in r.text
+    cfg = load_config(main.app.state.st.db)
+    assert (cfg.goals, cfg.athlete_level, cfg.sessions_per_week, cfg.default_coach) == ("Climb faster", "advanced", 4, "pogacar")
+    r = client.post("/profile", data={"athlete_level": "pro", "default_coach": "lance"})
+    assert "is not a valid choice" in r.text
+    cfg = load_config(main.app.state.st.db)
+    assert cfg.athlete_level == "advanced" and cfg.default_coach == "pogacar"
+    html = client.get("/profile").text
+    assert 'value="pogacar" checked' in html and "Climb faster" in html
+
+
+def test_plan_tabs_and_activate(client):
+    db = main.app.state.st.db
+    ws = main.stats.week_start(main.date.today()).isoformat()
+    first = db.save_plan(ws, "t1", "m", {"week_focus": "Base", "rationale": "", "block_week": 1, "days": []}, [], "pogacar")
+    second = db.save_plan(ws, "t2", "m", {"week_focus": "Crunch", "rationale": "", "block_week": 1, "days": []}, [], "carmichael")
+    html = client.get("/plan").text
+    assert "Base" in html and "Next Level" in html  # active plan's tab is shown, all coaches listed
+    html = client.get("/plan?coach=carmichael").text
+    assert "Crunch" in html and f"/plan/{second}/activate" in html
+    client.post(f"/plan/{second}/activate")
+    assert db.active_plan(ws)["id"] == second
+    assert f"/plan/{first}/activate" in client.get("/plan?coach=pogacar").text
+
+
+def test_scheduler_never_starts_llm_jobs(client, monkeypatch):
+    st = main.app.state.st
+    st.cfg.anthropic_api_key = "k"
+    started = []
+    monkeypatch.setattr(st, "start_job", lambda name, coro: (coro.close(), started.append(name)))
+    monkeypatch.setattr(main.asyncio, "sleep", lambda s: (_ for _ in ()).throw(SystemExit))
+
+    class Sunday(main.datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return main.datetime(2026, 10, 18, 19, 0, tzinfo=tz)
+
+    monkeypatch.setattr(main, "datetime", Sunday)
+    with pytest.raises(SystemExit):
+        import asyncio
+        asyncio.run(st.scheduler())
+    assert "plan" not in started and "analysis" not in started

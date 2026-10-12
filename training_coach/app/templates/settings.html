@@ -6,7 +6,7 @@
 <section class="card">
   <h2>Claude (AI coach and analysis)</h2>
   <p class="caption">Create a key at <a href="https://console.anthropic.com/settings/keys" target="_blank" rel="noopener">console.anthropic.com</a>.
-    A weekly plan plus a weekly analysis costs roughly a few dollars a month.</p>
+    The coach only runs when you ask. A plan plus an analysis a week costs roughly a few dollars a month.</p>
   <form method="post" action="{{ base }}/settings">
     <label>API key
       <input type="password" name="anthropic_api_key" autocomplete="off"
@@ -54,6 +54,27 @@
       </form>
     </li>
   </ol>
+  {% endif %}
+</section>
+
+<section class="card">
+  <h2>Zwift</h2>
+  {% if zwift_ok and zwift_profile %}
+    <p>✓ Connected as <b>{{ zwift_profile.firstName }} {{ zwift_profile.lastName }}</b>. Zwift sessions on the
+      Plan page have a <b>Send to Zwift</b> button.</p>
+    <form method="post" action="{{ base }}/settings/zwift/disconnect"><button class="secondary">Disconnect</button></form>
+  {% else %}
+  <p class="caption">Sends the coach's Zwift sessions straight to your Custom Workouts, with the coach's
+    on-screen messages. Zwift has no public API for this, so the add-on signs in like the Zwift app does.
+    Your password is used once to sign in and is <b>not stored</b>. Only the login session is kept.
+    {% if zwift_profile %}<br><b>The Zwift login has expired. Sign in again.</b>{% endif %}</p>
+  <form method="post" action="{{ base }}/settings/zwift/connect">
+    <div class="grid2">
+      <label>Zwift email <input type="email" name="zwift_username" autocomplete="username" required></label>
+      <label>Password <input type="password" name="zwift_password" autocomplete="current-password" required></label>
+    </div>
+    <button>Connect Zwift</button>
+  </form>
   {% endif %}
 </section>
 

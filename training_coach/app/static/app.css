@@ -115,6 +115,7 @@ details.data th:first-child, details.data td:first-child { text-align: left; }
 .day h3 { margin: 0 0 4px; font-size: 16px; }
 .day .date { font-weight: 600; }
 .day .facts { font-size: 13px; color: var(--text-secondary); overflow-wrap: anywhere; }
+.zwift-send { margin: 0 0 8px; }
 .workout-svg { width: 100%; height: 64px; margin-top: 8px; display: block; border-bottom: 1px solid var(--axis); }
 .workout-svg .ftp-line { stroke: var(--text-muted); stroke-dasharray: 3 3; stroke-width: 1; vector-effect: non-scaling-stroke; }
 .steps { font-size: 13px; color: var(--text-secondary); margin: 8px 0 0; padding-left: 18px; }
@@ -138,11 +139,22 @@ table.zones td { padding: 3px 6px 3px 0; }
 .form-page label { display: block; font-size: 13px; color: var(--text-secondary); margin-bottom: 12px; }
 .form-page label small { display: block; color: var(--text-muted); margin-top: 3px; }
 .form-page label.inline { display: inline-flex; gap: 6px; align-items: center; margin: 0 14px 12px 0; color: var(--text-primary); font-size: 14px; }
-.form-page input:not([type=checkbox]) {
+.form-page input:not([type=checkbox], [type=radio]), .form-page textarea, .form-page select, .coach-pick select {
   display: block; width: 100%; margin-top: 4px; font: inherit; font-size: 14px; padding: 7px 10px; border-radius: 6px;
   border: 1px solid var(--axis); background: var(--page); color: var(--text-primary);
 }
+.form-page textarea { resize: vertical; min-height: 96px; }
 .form-page input:disabled { opacity: .5; }
+.form-page label.choice { display: flex; gap: 10px; align-items: flex-start; color: var(--text-primary); font-size: 14px; }
+.form-page label.choice input { margin-top: 3px; }
+.form-page label.choice small { margin-top: 1px; }
+.coach-pick { display: flex; gap: 8px; align-items: center; }
+.coach-pick select { width: auto; max-width: 100%; margin-top: 0; }
+.tabs { display: flex; flex-wrap: wrap; gap: 0 4px; border-bottom: 1px solid var(--border); margin-bottom: 16px; }
+.tabs a { padding: 8px 12px; text-decoration: none; color: var(--text-secondary); font-size: 14px; white-space: nowrap;
+  border-bottom: 2px solid transparent; margin-bottom: -1px; }
+.tabs a.active { color: var(--text-primary); font-weight: 600; border-bottom-color: var(--text-primary); }
+.tabs a.empty { color: var(--text-muted); }
 .form-page .row { display: flex; gap: 12px; align-items: center; }
 .form-page .row input { margin-top: 0; }
 .form-page .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 0 16px; }
@@ -168,4 +180,6 @@ button, .btn { white-space: nowrap; }
   .history { border-top: 1px solid var(--border); padding-top: 12px; }
   .form-page .row { flex-wrap: wrap; }
   .form-page .row input { flex: 1 1 100%; }
+  .coach-pick { flex-wrap: wrap; width: 100%; }
+  .coach-pick select { flex: 1 1 auto; }
 }
