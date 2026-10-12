@@ -27,7 +27,14 @@ async def sync(db: DB, strava: StravaClient, cfg: Config) -> dict:
     else:
         after = now - timedelta(days=BACKFILL_DAYS)
 
-    listed = await strava.activities_since(int(after.timestamp()))
+    try:
+        listed = await strava.activities_since(int(after.timestamp()))
+    except RateLimited as e:
+        # Not a failure: the next scheduled sync picks up where this one would have.
+        log.info("Sync skipped: %s", e)
+        result = (db.get("last_sync") or {}) | {"at": now.isoformat(timespec="seconds"), "rate_limited": str(e)}
+        db.set("last_sync", result)
+        return result
     rides = [a for a in listed if (a.get("sport_type") or a.get("type")) in RIDE_TYPES]
     new = sum(db.upsert_activity_summary(summary_from_strava(a)) for a in rides)
     if last:
@@ -48,7 +55,7 @@ async def sync(db: DB, strava: StravaClient, cfg: Config) -> dict:
 
     recompute(db, cfg)
     result = {"at": now.isoformat(timespec="seconds"), "listed": len(rides), "new": new,
-              "streams": fetched, "pending_streams": len(db.activities_missing_streams(10_000))}
+              "streams": fetched, "pending_streams": len(db.activities_missing_streams(10_000)), "rate_limited": ""}
     db.set("last_sync", result)
     return result
 

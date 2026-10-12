@@ -21,7 +21,7 @@
   <div class="status">
     {% if jobs.sync and jobs.sync.running %}<span>Syncing…</span>
     {% elif last_sync %}<span title="{{ last_sync.listed }} rides listed, {{ last_sync.pending_streams }} awaiting power data">
-      Synced {{ last_sync.at[:16] | replace('T', ' ') }} UTC{% if last_sync.pending_streams %} · {{ last_sync.pending_streams }} rides still loading{% endif %}</span>
+      Synced {{ last_sync.at[:16] | replace('T', ' ') }} UTC{% if last_sync.rate_limited %} · {{ last_sync.rate_limited }}{% elif last_sync.pending_streams %} · {{ last_sync.pending_streams }} rides still loading{% endif %}</span>
     {% endif %}
     <form method="post" action="{{ base }}/sync"><button class="secondary" {{ 'disabled' if not strava_ok or (jobs.sync and jobs.sync.running) }}>Sync now</button></form>
   </div>

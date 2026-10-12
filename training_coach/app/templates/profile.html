@@ -2,12 +2,12 @@
 {% set page = 'profile' %}
 {% block content %}
 <div class="form-page">
-<form method="post" action="{{ base }}/profile">
+<form method="post" action="{{ base }}/profile" class="form-cols">
 <section class="card">
   <h2>Goals</h2>
   <p class="caption">The coach plans and analyses toward this.</p>
   <label>What are you training for? <textarea name="goals" rows="4" placeholder="E.g. ride a 160 km gravel event in June, climb faster, reach 4 W/kg…">{{ cfg.goals }}</textarea></label>
-  <div class="grid2">
+  <div class="grid2 wide-first">
     <label>Level <select name="athlete_level">
       {% for key, (name, hint) in levels.items() %}
       <option value="{{ key }}" {{ 'selected' if key == cfg.athlete_level }}>{{ name }} · {{ hint }}</option>
@@ -31,9 +31,9 @@
   <h2>Athlete</h2>
   <div class="grid3">
     <label>Weight (kg) <input name="weight_kg" value="{{ cfg.weight_kg }}" inputmode="decimal"></label>
-    <label>FTP override (W) <input name="ftp_override" value="{{ cfg.ftp_override or '' }}" inputmode="numeric" placeholder="estimate from rides">
+    <label>FTP override (W) <input name="ftp_override" value="{{ cfg.ftp_override or '' }}" inputmode="numeric" placeholder="auto">
       <small>Leave empty to use the eFTP estimated from your best efforts.</small></label>
-    <label>Threshold heart rate (bpm) <input name="lthr" value="{{ cfg.lthr }}" inputmode="numeric">
+    <label>Threshold HR (bpm) <input name="lthr" value="{{ cfg.lthr }}" inputmode="numeric">
       <small>Used for load on rides without power.</small></label>
   </div>
 </section>
@@ -47,12 +47,12 @@
     <label class="inline"><input type="checkbox" name="available_days" value="{{ d }}" {{ 'checked' if d in cfg.available_days }}> {{ d | capitalize }}</label>
     {% endfor %}
   </div>
-  <div class="grid3">
+  <div class="grid2">
     <label>Max minutes, weekdays <input name="max_weekday_minutes" value="{{ cfg.max_weekday_minutes }}" inputmode="numeric"></label>
     <label>Max minutes, weekends <input name="max_weekend_minutes" value="{{ cfg.max_weekend_minutes }}" inputmode="numeric"></label>
   </div>
 </section>
-<button>Save profile</button>
+<div class="form-actions"><button>Save profile</button></div>
 </form>
 </div>
 {% endblock %}

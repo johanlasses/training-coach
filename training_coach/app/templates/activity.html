@@ -3,7 +3,7 @@
 {% set page = 'home' %}
 {% block content %}
 <p><a href="{{ base }}/">← Overview</a></p>
-<h2 style="margin:0">{{ a.name }}</h2>
+<h2 class="page-title">{{ a.name }}</h2>
 <p class="muted">{{ ride_type(a) }} · {{ a.start_date_local[:10] }} {{ a.start_date_local[11:16] }} ·
   <a href="https://www.strava.com/activities/{{ a.id }}" target="_blank" rel="noopener">Open on Strava</a></p>
 
@@ -43,9 +43,9 @@
   {% set zmax = (zones | map(attribute=1) | max) or 1 %}
   <table class="zones">
   {% for name, secs in zones %}
-    <tr><td style="width:130px">{{ name }}</td>
+    <tr><td class="zone-name">{{ name }}</td>
         <td><div class="zbar" data-zone="{{ loop.index0 }}" style="width: {{ (secs / zmax * 100) | round(1) }}%"></div></td>
-        <td style="width:70px; text-align:right">{{ secs | duration }}</td></tr>
+        <td class="num">{{ secs | duration }}</td></tr>
   {% endfor %}
   </table>
 </div>

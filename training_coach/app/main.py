@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 from contextlib import asynccontextmanager
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
@@ -268,7 +269,12 @@ async def analysis_view(request: Request, id: int | None = None):
 
 @app.post("/sync")
 async def sync_now(request: Request):
-    request.app.state.st.start_job("sync", request.app.state.st.do_sync())
+    st: State = request.app.state.st
+    if st.strava.paused_until > time.time():
+        until = datetime.fromtimestamp(st.strava.paused_until, timezone.utc).strftime("%H:%M")
+        st.flash = ("ok", f"Strava's rate limit was reached. Sync resumes on its own at {until} UTC.")
+        return back(request, "/")
+    st.start_job("sync", st.do_sync())
     return back(request, "/")
 
 

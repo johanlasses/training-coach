@@ -92,3 +92,53 @@ async def test_rate_limit_stops_stream_fetch(db):
     assert result["streams"] == 0 and result["pending_streams"] == 3
     # Without streams, Strava's weighted average watts drives TSS
     assert db.activity(1)["tss_source"] == "power"
+
+
+@respx.mock
+async def test_429_pauses_strava_and_sync_does_not_fail(db):
+    respx.post(TOKEN_URL).mock(return_value=httpx.Response(200, json={
+        "access_token": "a", "refresh_token": "b", "expires_at": int(time.time()) + 3600}))
+    listing = respx.get(f"{API}/athlete/activities").mock(return_value=httpx.Response(
+        429, headers={"x-readratelimit-usage": "40,1003", "x-readratelimit-limit": "100,1000"}))
+    db.set("strava_token", {"refresh_token": "r1"})
+    db.set("last_sync", {"listed": 5, "pending_streams": 2})
+    result = await sync(db, StravaClient(db, "id", "s"), Config())
+    assert "resumes at 00:00 UTC" in result["rate_limited"]  # daily limit: wait for midnight UTC
+    assert result["listed"] == 5 and db.get("strava_backoff_until") > time.time()
+    # A fresh client (e.g. after saving settings) respects the pause without calling Strava
+    await sync(db, StravaClient(db, "id", "s"), Config())
+    assert listing.call_count == 1
+
+
+@respx.mock
+async def test_backfill_keeps_daily_reserve_for_listing(db):
+    respx.post(TOKEN_URL).mock(return_value=httpx.Response(200, json={
+        "access_token": "a", "refresh_token": "b", "expires_at": int(time.time()) + 3600}))
+    respx.get(f"{API}/athlete/activities").mock(return_value=httpx.Response(200, json=[
+        strava_activity(i, start=f"2026-10-0{i}T10:00:00Z") for i in range(1, 4)],
+        headers={"x-readratelimit-usage": "10,905", "x-readratelimit-limit": "100,1000"}))
+    streams = respx.get(url__regex=rf"{API}/activities/\d+/streams")
+    db.set("strava_token", {"refresh_token": "r1"})
+    result = await sync(db, StravaClient(db, "id", "s"), Config())
+    assert result["streams"] == 0 and result["pending_streams"] == 3 and not result["rate_limited"]
+    assert streams.call_count == 0
+
+
+def test_next_reset():
+    from datetime import datetime, timezone
+
+    from app.strava import _next_reset
+    now = datetime(2026, 10, 12, 14, 7, 30, tzinfo=timezone.utc)
+    assert datetime.fromtimestamp(_next_reset(now, daily=False), timezone.utc).strftime("%H:%M") == "14:15"
+    assert datetime.fromtimestamp(_next_reset(now, daily=True), timezone.utc).isoformat() == "2026-10-13T00:00:00+00:00"
+
+
+def test_sync_now_during_pause_explains_instead_of_failing(tmp_path, monkeypatch):
+    from fastapi.testclient import TestClient
+
+    from app import main
+    monkeypatch.setattr(main, "DATA_DIR", tmp_path)
+    with TestClient(main.app) as c:
+        c.app.state.st.db.set("strava_backoff_until", time.time() + 600)
+        assert "Sync resumes on its own" in c.post("/sync").text
+        assert "sync" not in c.app.state.st.jobs

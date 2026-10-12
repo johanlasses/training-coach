@@ -19,13 +19,13 @@
     {% if not ai_ok %}<div class="notice error">Add your Claude API key in <a href="{{ base }}/settings">Settings</a> to enable analysis.</div>{% endif %}
     {% if a %}
       <div class="report">{{ html | safe }}</div>
-      <p class="muted" style="font-size:13px">Written by {{ a.model }}</p>
+      <p class="footnote">Written by {{ a.model }}</p>
     {% else %}
-      <div class="card"><p style="margin:0">No analysis yet. Pick a coach and run one.</p></div>
+      <div class="card"><p class="flush">No analysis yet. Pick a coach and run one.</p></div>
     {% endif %}
   </section>
   <aside class="history">
-    <h2 style="font-size:15px; margin:0 0 8px">History</h2>
+    <h2 class="section-title">History</h2>
     {% for h in history %}
       <a href="{{ base }}/analysis?id={{ h.id }}" class="{{ 'active' if a and a.id == h.id }}">{{ h.created_at[:10] }} · {{ h.coach | coach_name }}</a>
     {% else %}<p class="muted">—</p>{% endfor %}

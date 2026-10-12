@@ -68,9 +68,9 @@
       {% set zmax = (d.zones28 | map(attribute='hours') | max) or 1 %}
       <table class="zones">
       {% for z in d.zones28 %}
-        <tr><td style="width:130px">{{ z.zone }}</td>
+        <tr><td class="zone-name">{{ z.zone }}</td>
             <td><div class="zbar" data-zone="{{ loop.index0 }}" style="width: {{ (z.hours / zmax * 100) | round(1) }}%"></div></td>
-            <td style="width:90px; text-align:right">{{ z.hours }} h · {{ z.pct }}%</td></tr>
+            <td class="num">{{ z.hours }} h · {{ z.pct }}%</td></tr>
       {% endfor %}
       </table>
     </div>
@@ -78,7 +78,7 @@
   </section>
 
   <section>
-    <h2 style="font-size:15px; margin: 0 0 12px">Recent rides</h2>
+    <h2 class="section-title">Recent rides</h2>
     {% for a in feed %}
     <a class="feed-item" href="{{ base }}/activity/{{ a.id }}">
       <div class="feed-head">

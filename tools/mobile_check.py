@@ -6,6 +6,8 @@ lie about mobile. This uses Playwright mobile emulation with the locally install
 
   .venv/bin/python tools/mobile_check.py                 # default pages, dark mode
   .venv/bin/python tools/mobile_check.py /plan --light   # specific pages, light mode
+  .venv/bin/python tools/mobile_check.py --desktop       # 1280 px browser window instead of an iPhone
+  .venv/bin/python tools/mobile_check.py --desktop --width=1000   # e.g. inside HA's ingress frame
 
 Needs the app running (default http://localhost:8099, override with TC_URL). Exit code 1 on overflow.
 """
@@ -30,7 +32,7 @@ OVERFLOW_JS = """() => {
 
 
 def default_pages() -> list[str]:
-    pages = ["/", "/plan", "/analysis", "/settings"]
+    pages = ["/", "/plan", "/analysis", "/profile", "/settings"]
     db = Path(os.environ.get("TC_DATA_DIR", "/tmp/tc-demo")) / "training.db"
     if db.exists():
         row = sqlite3.connect(db).execute("SELECT id FROM activities ORDER BY start_date DESC LIMIT 1").fetchone()
@@ -46,13 +48,19 @@ def main() -> int:
     failed = False
     with sync_playwright() as p:
         browser = p.chromium.launch(channel="chrome")
-        page = browser.new_page(viewport={"width": 390, "height": 844}, device_scale_factor=2,
-                                is_mobile=True, has_touch=True, color_scheme=scheme)
+        desktop = "--desktop" in sys.argv
+        device = "desktop" if desktop else "iphone"
+        if desktop:
+            width = next((int(a.split("=")[1]) for a in sys.argv if a.startswith("--width=")), 1280)
+            page = browser.new_page(viewport={"width": width, "height": 900}, color_scheme=scheme)
+        else:
+            page = browser.new_page(viewport={"width": 390, "height": 844}, device_scale_factor=2,
+                                    is_mobile=True, has_touch=True, color_scheme=scheme)
         for path in args or default_pages():
             page.goto(f"{BASE}{path}")
             page.wait_for_timeout(500)
             name = path.strip("/").replace("/", "-") or "home"
-            shot = SHOTS / f"iphone-{name}-{scheme}.png"
+            shot = SHOTS / f"{device}-{name}-{scheme}.png"
             page.screenshot(path=str(shot), full_page=True)
             r = page.evaluate(OVERFLOW_JS)
             ok = r["scroll"] <= r["vw"] and not r["offenders"]

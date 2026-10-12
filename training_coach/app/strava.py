@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import logging
 import time
+from datetime import datetime, timedelta, timezone
 from urllib.parse import parse_qs, urlencode, urlparse
 
 import httpx
@@ -21,6 +22,10 @@ SCOPES = "read,activity:read_all,profile:read_all"
 
 RIDE_TYPES = {"Ride", "VirtualRide", "GravelRide", "MountainBikeRide"}
 
+# Strava's read limits: 100 per 15 min (windows reset at :00/:15/:30/:45) and 1000 per day (reset at
+# midnight UTC). Backfilling streams stops this far below the daily limit so syncs can still list new rides.
+DAILY_RESERVE = 100
+
 
 class RateLimited(Exception):
     pass
@@ -34,9 +39,9 @@ class StravaClient:
         self.client_id = client_id
         self.client_secret = client_secret
         self.http = http or httpx.AsyncClient(timeout=30)
-        # Short-term usage as reported by Strava (requests in current 15-min window, limit)
-        self.usage_15min = 0
-        self.limit_15min = 100
+        # Usage as reported by Strava on the last response: (15-min window, day) and their limits
+        self.usage_15min = self.usage_daily = 0
+        self.limit_15min, self.limit_daily = 100, 1000
 
     @property
     def has_app(self) -> bool:
@@ -94,14 +99,27 @@ class StravaClient:
         self.db.set("strava_token", {k: data[k] for k in ("access_token", "refresh_token", "expires_at")})
         return data["access_token"]
 
-    async def _get(self, path: str, **params) -> httpx.Response:
+    @property
+    def paused_until(self) -> float:
+        """Epoch until which Strava calls are paused after a 429 (stored, so it survives a settings save)."""
+        return self.db.get("strava_backoff_until") or 0
+
+    async def _get(self, path: str, backfill: bool = False, **params) -> httpx.Response:
+        if self.paused_until > time.time():
+            raise RateLimited(f"Strava rate limit reached, sync resumes at {_hhmm(self.paused_until)} UTC")
         if self.usage_15min >= self.limit_15min - 5:
             raise RateLimited(f"near 15-min limit ({self.usage_15min}/{self.limit_15min})")
+        if backfill and self.usage_daily >= self.limit_daily - DAILY_RESERVE:
+            raise RateLimited(f"near daily limit ({self.usage_daily}/{self.limit_daily}), keeping the rest for new rides")
         r = await self.http.get(f"{API}{path}", params=params,
                                 headers={"Authorization": f"Bearer {await self._token()}"})
         self._track(r)
         if r.status_code == 429:
-            raise RateLimited("429 from Strava")
+            until = _next_reset(datetime.now(timezone.utc), daily=self.usage_daily >= self.limit_daily)
+            self.db.set("strava_backoff_until", until)
+            log.warning("Strava 429 (usage %s/%s, daily %s/%s); pausing until %s UTC", self.usage_15min,
+                        self.limit_15min, self.usage_daily, self.limit_daily, _hhmm(until))
+            raise RateLimited(f"Strava rate limit reached, sync resumes at {_hhmm(until)} UTC")
         r.raise_for_status()
         return r
 
@@ -110,8 +128,8 @@ class StravaClient:
         usage = r.headers.get("x-readratelimit-usage") or r.headers.get("x-ratelimit-usage")
         limit = r.headers.get("x-readratelimit-limit") or r.headers.get("x-ratelimit-limit")
         if usage and limit:
-            self.usage_15min = int(usage.split(",")[0])
-            self.limit_15min = int(limit.split(",")[0])
+            self.usage_15min, self.usage_daily = (int(x) for x in usage.split(",")[:2])
+            self.limit_15min, self.limit_daily = (int(x) for x in limit.split(",")[:2])
 
     async def athlete(self) -> dict:
         return (await self._get("/athlete")).json()
@@ -127,9 +145,20 @@ class StravaClient:
             page += 1
 
     async def streams(self, activity_id: int) -> dict[str, list]:
-        r = await self._get(f"/activities/{activity_id}/streams",
+        r = await self._get(f"/activities/{activity_id}/streams", backfill=True,
                             keys="time,watts,heartrate", key_by_type="true")
         return {k: v["data"] for k, v in r.json().items()}
+
+
+def _next_reset(now: datetime, daily: bool) -> float:
+    if daily:
+        return (now + timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0).timestamp()
+    start = now.replace(minute=now.minute - now.minute % 15, second=0, microsecond=0)
+    return (start + timedelta(minutes=15)).timestamp()
+
+
+def _hhmm(epoch: float) -> str:
+    return datetime.fromtimestamp(epoch, timezone.utc).strftime("%H:%M")
 
 
 def summary_from_strava(a: dict) -> dict:
