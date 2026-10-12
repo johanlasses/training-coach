@@ -88,7 +88,7 @@ def dashboard(acts: list[dict], today: date, cfg: Config) -> dict:
     }
 
 
-def snapshot(acts: list[dict], today: date, cfg: Config, forecast: list[dict]) -> dict:
+def snapshot(acts: list[dict], today: date, cfg: Config) -> dict:
     """Compact, factual state of the athlete for the LLM. No raw streams."""
     d = dashboard(acts, today, cfg)
     curve = d["curve90"]
@@ -120,7 +120,6 @@ def snapshot(acts: list[dict], today: date, cfg: Config, forecast: list[dict]) -
         } for a in sorted(recent, key=lambda a: a["start_date_local"])],
         "season": {"phase": season.phase(today), "description": season.PHASE_TEXT[season.phase(today)],
                    "daylight_hours": hours, "sunrise": sunrise, "sunset": sunset},
-        "forecast": forecast,
         "availability": {wd: cfg.max_minutes(i) for i, wd in enumerate(
             ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"])},
     }

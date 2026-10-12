@@ -1,0 +1,34 @@
+{% extends "base.html" %}
+{% set page = 'profile' %}
+{% block content %}
+<div class="form-page">
+<form method="post" action="{{ base }}/profile">
+<section class="card">
+  <h2>Athlete</h2>
+  <div class="grid3">
+    <label>Weight (kg) <input name="weight_kg" value="{{ cfg.weight_kg }}" inputmode="decimal"></label>
+    <label>FTP override (W) <input name="ftp_override" value="{{ cfg.ftp_override or '' }}" inputmode="numeric" placeholder="estimate from rides">
+      <small>Leave empty to use the eFTP estimated from your best efforts.</small></label>
+    <label>Threshold heart rate (bpm) <input name="lthr" value="{{ cfg.lthr }}" inputmode="numeric">
+      <small>Used for load on rides without power.</small></label>
+  </div>
+</section>
+
+<section class="card">
+  <h2>Availability</h2>
+  <p class="caption">The coach never plans outside these limits.</p>
+  <input type="hidden" name="availability" value="1">
+  <div class="days">
+    {% for d in weekdays %}
+    <label class="inline"><input type="checkbox" name="available_days" value="{{ d }}" {{ 'checked' if d in cfg.available_days }}> {{ d | capitalize }}</label>
+    {% endfor %}
+  </div>
+  <div class="grid3">
+    <label>Max minutes, weekdays <input name="max_weekday_minutes" value="{{ cfg.max_weekday_minutes }}" inputmode="numeric"></label>
+    <label>Max minutes, weekends <input name="max_weekend_minutes" value="{{ cfg.max_weekend_minutes }}" inputmode="numeric"></label>
+  </div>
+</section>
+<button>Save profile</button>
+</form>
+</div>
+{% endblock %}

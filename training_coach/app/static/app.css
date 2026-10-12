@@ -134,20 +134,20 @@ table.zones { width: 100%; border-collapse: collapse; font-size: 13px; font-vari
 table.zones td { padding: 3px 6px 3px 0; }
 .zbar { height: 10px; border-radius: 0 4px 4px 0; background: var(--series-1); min-width: 2px; }
 
-.settings { max-width: 820px; }
-.settings label { display: block; font-size: 13px; color: var(--text-secondary); margin-bottom: 12px; }
-.settings label small { display: block; color: var(--text-muted); margin-top: 3px; }
-.settings label.inline { display: inline-flex; gap: 6px; align-items: center; margin: 0 14px 12px 0; color: var(--text-primary); font-size: 14px; }
-.settings input:not([type=checkbox]) {
+.form-page { max-width: 820px; }
+.form-page label { display: block; font-size: 13px; color: var(--text-secondary); margin-bottom: 12px; }
+.form-page label small { display: block; color: var(--text-muted); margin-top: 3px; }
+.form-page label.inline { display: inline-flex; gap: 6px; align-items: center; margin: 0 14px 12px 0; color: var(--text-primary); font-size: 14px; }
+.form-page input:not([type=checkbox]) {
   display: block; width: 100%; margin-top: 4px; font: inherit; font-size: 14px; padding: 7px 10px; border-radius: 6px;
   border: 1px solid var(--axis); background: var(--page); color: var(--text-primary);
 }
-.settings input:disabled { opacity: .5; }
-.settings .row { display: flex; gap: 12px; align-items: center; }
-.settings .row input { margin-top: 0; }
-.settings .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 0 16px; }
-.settings .grid3 { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0 16px; }
-@media (max-width: 700px) { .settings .grid2, .settings .grid3 { grid-template-columns: 1fr; } }
+.form-page input:disabled { opacity: .5; }
+.form-page .row { display: flex; gap: 12px; align-items: center; }
+.form-page .row input { margin-top: 0; }
+.form-page .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 0 16px; }
+.form-page .grid3 { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0 16px; }
+@media (max-width: 700px) { .form-page .grid2, .form-page .grid3 { grid-template-columns: 1fr; } }
 .steps-list { padding-left: 20px; margin: 0; }
 .steps-list li { margin-bottom: 18px; }
 .steps-list li.disabled { opacity: .55; }
@@ -166,4 +166,6 @@ button, .btn { white-space: nowrap; }
   .report { padding: 4px 16px 12px; }
   .report ul, .report ol { padding-left: 20px; }
   .history { border-top: 1px solid var(--border); padding-top: 12px; }
+  .form-page .row { flex-wrap: wrap; }
+  .form-page .row input { flex: 1 1 100%; }
 }

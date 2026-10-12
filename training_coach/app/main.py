@@ -67,16 +67,15 @@ class State:
         await sync(self.db, self.strava, self.cfg)
         await self.publish()
 
-    async def snapshot(self) -> dict:
-        forecast = await ha.daily_forecast(self.cfg.weather_entity)
-        return stats.snapshot(self.db.activities(), date.today(), self.cfg, forecast)
+    def snapshot(self) -> dict:
+        return stats.snapshot(self.db.activities(), date.today(), self.cfg)
 
     async def do_plan(self, week_start: date) -> None:
-        await coach.generate_plan(self.db, self.cfg, await self.snapshot(), week_start, date.today())
+        await coach.generate_plan(self.db, self.cfg, self.snapshot(), week_start, date.today())
         await self.publish()
 
     async def do_analysis(self, kind: str) -> None:
-        await analysis.run_analysis(self.db, self.cfg, await self.snapshot(), kind)
+        await analysis.run_analysis(self.db, self.cfg, self.snapshot(), kind)
 
     async def publish(self) -> None:
         today = date.today()
@@ -250,20 +249,12 @@ async def analysis_now(request: Request):
     return back(request, "/analysis")
 
 
-@app.get("/settings")
-async def settings_view(request: Request):
-    st: State = request.app.state.st
-    return render(request, "settings.html", cfg=st.cfg, weekdays=WEEKDAYS, athlete=st.db.get("strava_athlete"),
-                  strava_app=st.strava.has_app, authorize_url=st.strava.authorize_url() if st.strava.has_app else None,
-                  redirect_uri=REDIRECT_URI, has_secret={k: bool(getattr(st.cfg, k)) for k in SECRETS})
+def apply_form(st: State, form) -> list[str]:
+    """Apply the config fields present in a submitted form and persist. Returns parse errors.
 
-
-@app.post("/settings")
-async def settings_save(request: Request):
-    st: State = request.app.state.st
-    form = await request.form()
+    Fields missing from the form are untouched, so each page only changes its own settings.
+    """
     cfg = st.cfg
-    old_key = cfg.anthropic_api_key
     errors = []
     for name, typ in FIELD_TYPES.items():
         if name == "available_days":
@@ -283,8 +274,22 @@ async def settings_save(request: Request):
         cfg.anthropic_api_key = ""
     save_config(st.db, cfg)
     st.reload()
-    recompute(st.db, st.cfg)
+    return errors
 
+
+@app.get("/settings")
+async def settings_view(request: Request):
+    st: State = request.app.state.st
+    return render(request, "settings.html", cfg=st.cfg, athlete=st.db.get("strava_athlete"),
+                  strava_app=st.strava.has_app, authorize_url=st.strava.authorize_url() if st.strava.has_app else None,
+                  redirect_uri=REDIRECT_URI, has_secret={k: bool(getattr(st.cfg, k)) for k in SECRETS})
+
+
+@app.post("/settings")
+async def settings_save(request: Request):
+    st: State = request.app.state.st
+    old_key = st.cfg.anthropic_api_key
+    errors = apply_form(st, await request.form())
     if errors:
         st.flash = ("error", "Saved, except: " + "; ".join(errors))
     elif st.cfg.anthropic_api_key and st.cfg.anthropic_api_key != old_key:
@@ -294,6 +299,22 @@ async def settings_save(request: Request):
     else:
         st.flash = ("ok", "Settings saved.")
     return back(request, "/settings")
+
+
+@app.get("/profile")
+async def profile_view(request: Request):
+    st: State = request.app.state.st
+    return render(request, "profile.html", cfg=st.cfg, weekdays=WEEKDAYS)
+
+
+@app.post("/profile")
+async def profile_save(request: Request):
+    st: State = request.app.state.st
+    errors = apply_form(st, await request.form())
+    recompute(st.db, st.cfg)  # FTP override and LTHR change every ride's TSS
+    await st.publish()
+    st.flash = ("error", "Saved, except: " + "; ".join(errors)) if errors else ("ok", "Profile saved.")
+    return back(request, "/profile")
 
 
 @app.post("/settings/strava/connect")

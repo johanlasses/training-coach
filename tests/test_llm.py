@@ -78,7 +78,7 @@ async def test_generate_plan_retries_with_errors(tmp_path, monkeypatch):
         return SimpleNamespace(content=[SimpleNamespace(type="text", text=replies[len(calls) - 1])])
 
     monkeypatch.setattr(llm, "run", fake_run)
-    snapshot = {"recent_rides": [], "load": {"ctl": 50}, "forecast": []}
+    snapshot = {"recent_rides": [], "load": {"ctl": 50}}
     cfg = Config(anthropic_api_key="k")
     plan_id = await coach.generate_plan(db, cfg, snapshot, date(2026, 10, 12), date(2026, 10, 11))
 

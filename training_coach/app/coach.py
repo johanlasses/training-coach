@@ -53,12 +53,11 @@ PLAN_SCHEMA = {
                     "target_tss": {"type": "integer"},
                     "bike": {"type": "string", "enum": ["none", "road", "gravel", "trainer"]},
                     "terrain": {"type": "string", "description": "Outdoor only: route/terrain hint, else empty"},
-                    "weather_note": {"type": "string", "description": "Outdoor only, else empty"},
                     "steps": {"type": "array", "items": STEP_SCHEMA,
                               "description": "Zwift only: full workout; empty for rest/outdoor"},
                 },
                 "required": ["date", "kind", "title", "description", "duration_min", "intensity",
-                             "target_tss", "bike", "terrain", "weather_note", "steps"],
+                             "target_tss", "bike", "terrain", "steps"],
                 "additionalProperties": False,
             },
         },
@@ -71,8 +70,8 @@ SYSTEM = """You are an experienced cycling coach for a single amateur road and g
 Mälardalen, Sweden. They train on Zwift indoors and ride road/gravel outside. Their current goal \
 is general fitness and FTP gain, organised as rolling 4-week blocks (3 build weeks + 1 recovery week).
 
-You receive a JSON snapshot of their training (load metrics, power curve, recent rides, weather \
-forecast, season, availability) and plan the requested days.
+You receive a JSON snapshot of their training (load metrics, power curve, recent rides, season and \
+daylight, availability) and plan the requested days.
 
 Principles:
 - Base intensities on the given FTP. Express all Zwift power as fractions of FTP.
@@ -81,8 +80,9 @@ Principles:
 - Respect form: if TSB is below -25, reduce load; if above +10, the athlete can absorb more.
 - Keep CTL ramp at roughly +3 to +6 per week in build weeks. Recovery weeks ~60-70% of a build week's TSS, no VO2max.
 - Each day's duration must fit within the availability minutes for that weekday (0 = rest day).
-- Outdoor rides only when the forecast is rideable (dry enough, not too cold or windy) and it fits the \
-season; weekday outdoor rides need daylight after work (sunset well after 18:00). Otherwise use Zwift.
+- Choose outdoor rides from the season and daylight: weekend outdoor rides when the season allows, weekday \
+outdoor rides only with daylight after work (sunset well after 18:00). Otherwise use Zwift. The athlete swaps \
+an outdoor ride for Zwift themselves if the weather turns, so give outdoor days a Zwift-friendly purpose.
 - Outdoor rides: endurance/tempo, group-ride or long gravel days. Say road or gravel, give a terrain hint.
 - Zwift workouts: complete step lists with warmup and cooldown; step durations must add up to \
 duration_min. Use cadence targets sparingly and purposefully.
@@ -99,21 +99,13 @@ def block_week(db: DB, week_start: date) -> int:
     return weeks % 4 + 1
 
 
-def rideable(day: dict, cfg: Config) -> bool:
-    return ((day.get("temp_c") or 0) >= cfg.rideable_min_temp_c
-            and (day.get("precip_mm") or 0) <= cfg.rideable_max_precip_mm
-            and (day.get("wind_ms") or 0) <= cfg.rideable_max_wind_ms)
-
-
-def validate(plan: dict, dates: list[str], cfg: Config, ctl: float, done_tss: float, recovery: bool,
-             forecast: list[dict]) -> list[str]:
+def validate(plan: dict, dates: list[str], cfg: Config, ctl: float, done_tss: float, recovery: bool) -> list[str]:
     """Hard checks the plan must pass. Also normalises Zwift TSS to the profile estimate (in place)."""
     errors = []
     days = plan["days"]
     if [d["date"] for d in days] != dates:
         errors.append(f"days must be exactly these dates in order: {dates}")
         return errors
-    fc = {f["date"]: f for f in forecast}
     for d in days:
         wd = date.fromisoformat(d["date"]).weekday()
         limit = cfg.max_minutes(wd)
@@ -138,10 +130,6 @@ def validate(plan: dict, dates: list[str], cfg: Config, ctl: float, done_tss: fl
             d["target_tss"] = round(workouts.estimated_tss(d["steps"]))
         elif d["steps"]:
             d["steps"] = []
-        if d["kind"] == "outdoor" and d["date"] in fc and not rideable(fc[d["date"]], cfg):
-            f = fc[d["date"]]
-            errors.append(f"{d['date']}: outdoor ride planned but forecast is not rideable "
-                          f"({f['temp_c']}°C, {f['precip_mm']} mm, {f['wind_ms']} m/s)")
         if d["kind"] == "rest":
             d["target_tss"] = 0
     for a, b in zip(days, days[1:]):
@@ -180,7 +168,7 @@ async def generate_plan(db: DB, cfg: Config, snapshot: dict, week_start: date, t
     for attempt in range(2):
         msg = await llm.run(cfg.anthropic_api_key, SYSTEM, messages, schema=PLAN_SCHEMA, effort="high")
         plan = json.loads(llm.text_of(msg))
-        warnings = validate(plan, dates, cfg, snapshot["load"]["ctl"], done_tss, recovery, snapshot["forecast"])
+        warnings = validate(plan, dates, cfg, snapshot["load"]["ctl"], done_tss, recovery)
         if not warnings:
             break
         log.info("Plan attempt %d failed validation: %s", attempt + 1, warnings)

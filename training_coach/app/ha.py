@@ -1,4 +1,4 @@
-"""Home Assistant access: weather forecast and notifications via the Supervisor proxy, sensors via MQTT."""
+"""Home Assistant access: notifications via the Supervisor proxy, sensors via MQTT."""
 from __future__ import annotations
 
 import json
@@ -25,30 +25,6 @@ async def _call(method: str, path: str, body: dict | None = None) -> httpx.Respo
                             headers={"Authorization": f"Bearer {HA_TOKEN}"})
         r.raise_for_status()
         return r
-
-
-async def daily_forecast(entity_id: str) -> list[dict]:
-    """Daily forecast normalized to metric: date, temp_c, templow_c, precip_mm, wind_ms, condition."""
-    if not available():
-        return []
-    try:
-        state = (await _call("GET", f"/states/{entity_id}")).json()
-        r = await _call("POST", "/services/weather/get_forecasts?return_response",
-                        {"entity_id": entity_id, "type": "daily"})
-    except httpx.HTTPError as e:
-        log.warning("Weather forecast unavailable: %s", e)
-        return []
-    unit = state.get("attributes", {}).get("wind_speed_unit", "km/h")
-    wind_factor = {"km/h": 1 / 3.6, "m/s": 1.0, "mph": 0.44704, "kn": 0.514444}.get(unit, 1 / 3.6)
-    data = r.json().get("service_response", {}).get(entity_id, {}).get("forecast", [])
-    return [{
-        "date": f["datetime"][:10],
-        "condition": f.get("condition"),
-        "temp_c": f.get("temperature"),
-        "templow_c": f.get("templow"),
-        "precip_mm": f.get("precipitation") or 0,
-        "wind_ms": round((f.get("wind_speed") or 0) * wind_factor, 1),
-    } for f in data]
 
 
 async def notify(service: str, title: str, message: str) -> None:

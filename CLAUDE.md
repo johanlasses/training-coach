@@ -22,9 +22,12 @@ A project hook re-runs pytest after every edit under `training_coach/app/` or `t
   `johanlasses/training-coach`. `/release-addon` has the one-off credential command. Never persist it.
 - **The user is on an iPhone.** Any template or CSS change must pass the `check-mobile` skill before it's done.
   Don't use inline `style="grid-template-columns…"`, because it overrides the responsive media queries.
-- **Settings live in the DB, not in the add-on options.** The in-app Settings page (`/settings`) is the only place for
-  credentials and preferences, and `training_coach/config.yaml` has no `options:`. New settings go in `app/config.py` (`Config`) plus
-  `templates/settings.html`. Never render secret values back into HTML.
+- **Settings live in the DB, not in the add-on options.** `training_coach/config.yaml` has no `options:`. All fields are in
+  `app/config.py` (`Config`) and are saved by `apply_form` in `main.py`. Credentials and notifications go on **Settings**
+  (`templates/settings.html`); athlete data and availability go on **Profile** (`templates/profile.html`).
+  Never render secret values back into HTML.
+- **No weather logic.** It was removed on purpose (too complex, little value). Outdoor vs Zwift comes from season and daylight
+  (`app/season.py`), and the athlete swaps days themselves.
 - **Ingress:** every URL in templates and redirects must be prefixed with `{{ base }}` / `back(request, …)`.
 - **Anthropic SDK 1.x uses httpx2.** respx can't mock it. Inject `httpx2.MockTransport` (see `tests/test_llm.py`).
   Model `claude-opus-5-5`, adaptive thinking, `fallbacks="default"` with beta `server-side-fallback-2026-07-01`.

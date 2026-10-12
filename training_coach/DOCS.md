@@ -12,7 +12,9 @@ Open the panel and go to **Settings**:
    - Create an API application at <https://www.strava.com/settings/api> and set *Authorization Callback Domain* to `localhost`.
    - Enter its Client ID and Client secret, then click **Connect with Strava** and approve.
    - Strava redirects to a `http://localhost/strava-callback?...` page that won't load. Copy that full address and paste it into step 3.
-3. Set your weight, threshold heart rate, availability and the weather limits for outdoor rides.
+3. Optionally set a notify service on **Settings** for a morning push with the day's session.
+
+Then open **Profile** and set your weight, threshold heart rate and availability. The coach never plans outside those limits.
 
 The first sync imports 12 months of rides. Power detail (NP, power curve, zones) is fetched gradually so Strava's rate limits aren't hit, which can take a few hours.
 

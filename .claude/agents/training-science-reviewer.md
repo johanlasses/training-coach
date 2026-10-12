@@ -16,7 +16,7 @@ Check, with concrete reasoning:
   Pw:HR decoupling, and zone boundaries (Coggan). Watch for off-by-one days, unit mistakes (s vs min, m/s vs km/h),
   resampling gaps that inflate or deflate NP, and FTP being applied to the wrong date.
 - **Plan rules** (`coach.py` validate/SYSTEM prompt): ramp-rate caps, recovery-week load, hard-day spacing, intensity
-  distribution, availability, outdoor-weather thresholds. Flag rules that would produce unsafe or pointless training,
+  distribution, availability, season/daylight choice of outdoor vs Zwift. Flag rules that would produce unsafe or pointless training,
   and rules the prompt states but the validator doesn't enforce (or the other way round).
 - **Workouts** (`workouts.py`): %FTP ranges per intensity, warmup and cooldown presence, estimated TSS vs the profile, and .zwo semantics.
 - **Analysis prompt** (`analysis.py`, `stats.snapshot`): does the snapshot give enough data for the claims the prompt asks for?

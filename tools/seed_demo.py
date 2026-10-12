@@ -73,17 +73,17 @@ for i in range(7):
     d = (ws + timedelta(days=i)).isoformat()
     if i == 1:
         days.append({"date": d, "kind": "zwift", "title": "Sweet spot 3×12", "description": "Steady sweet spot, smooth pedalling.",
-                     "duration_min": 66, "intensity": "sweetspot", "target_tss": 70, "bike": "trainer", "terrain": "", "weather_note": "",
+                     "duration_min": 66, "intensity": "sweetspot", "target_tss": 70, "bike": "trainer", "terrain": "",
                      "steps": [step("warmup", duration_s=600, power_low=0.45, power_high=0.75),
                                step("intervals", repeat=3, on_s=720, off_s=240, on_power=0.9, off_power=0.55, cadence=90, text="Settle in"),
                                step("cooldown", duration_s=480, power_low=0.6, power_high=0.4)]})
     elif i == 5:
         days.append({"date": d, "kind": "outdoor", "title": "Long gravel endurance", "description": "Z2, fuel every 30 min.",
                      "duration_min": 150, "intensity": "endurance", "target_tss": 120, "bike": "gravel",
-                     "terrain": "Forest roads north of Västerås", "weather_note": "Dry, 9°C, light wind", "steps": []})
+                     "terrain": "Forest roads north of Västerås", "steps": []})
     else:
         days.append({"date": d, "kind": "rest", "title": "Rest", "description": "Off the bike.", "duration_min": 0,
-                     "intensity": "recovery", "target_tss": 0, "bike": "none", "terrain": "", "weather_note": "", "steps": []})
+                     "intensity": "recovery", "target_tss": 0, "bike": "none", "terrain": "", "steps": []})
 db.save_plan(ws.isoformat(), datetime.now().isoformat(timespec="seconds"), "demo",
              {"week_focus": "Build aerobic base", "rationale": "Demo plan.", "days": days, "block_week": 2}, [])
 db.save_analysis(datetime.now().isoformat(timespec="seconds"), "manual", "demo",

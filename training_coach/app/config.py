@@ -30,11 +30,7 @@ class Config:
     available_days: list[str] = field(default_factory=lambda: ["mon", "tue", "wed", "thu", "sat", "sun"])
     max_weekday_minutes: int = 75
     max_weekend_minutes: int = 180
-    weather_entity: str = "weather.forecast_hem"
     notify_service: str = "notify.johan_iphone"
-    rideable_min_temp_c: float = 3.0
-    rideable_max_wind_ms: float = 10.0
-    rideable_max_precip_mm: float = 2.0
 
     def max_minutes(self, weekday: int) -> int:
         """Max training minutes for a weekday (0=Mon); 0 when the day is unavailable."""

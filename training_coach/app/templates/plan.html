@@ -43,7 +43,6 @@
       <p style="margin:6px 0 0">{{ d.description }}</p>
       {% if d.kind == 'outdoor' %}
         {% if d.terrain %}<p class="facts" style="margin:6px 0 0"><b>Terrain:</b> {{ d.terrain }}</p>{% endif %}
-        {% if d.weather_note %}<p class="facts" style="margin:2px 0 0"><b>Weather:</b> {{ d.weather_note }}</p>{% endif %}
       {% endif %}
       {% if d.steps %}
         {{ workout_svg(d.steps) | safe }}
@@ -74,7 +73,7 @@
 </div>
 {% else %}
 <div class="card"><p style="margin:0">No plan for this week yet.
-  {% if ai_ok %}Generate one — the coach plans from today through Sunday using your load, power curve, the {{ 'forecast' }} and your availability.{% endif %}
+  {% if ai_ok %}Generate one — the coach plans from today through Sunday using your load, power curve, the season and your availability.{% endif %}
   New plans are generated automatically every Sunday at 18:00 for the coming week.</p></div>
 {% endif %}
 {% endblock %}

@@ -12,7 +12,7 @@ DATES = [f"2026-10-{d}" for d in range(12, 19)]  # Mon 12 → Sun 18
 
 def day(date, kind="rest", minutes=0, intensity="recovery", tss=0, steps=None):
     return {"date": date, "kind": kind, "title": "x", "description": "", "duration_min": minutes,
-            "intensity": intensity, "target_tss": tss, "bike": "none", "terrain": "", "weather_note": "",
+            "intensity": intensity, "target_tss": tss, "bike": "none", "terrain": "",
             "steps": steps or []}
 
 
@@ -35,7 +35,7 @@ def good_plan():
 
 
 def run(plan, **kw):
-    args = dict(dates=DATES, cfg=CFG, ctl=50, done_tss=0, recovery=False, forecast=[])
+    args = dict(dates=DATES, cfg=CFG, ctl=50, done_tss=0, recovery=False)
     args.update(kw)
     return coach.validate(plan, **args)
 
@@ -72,14 +72,6 @@ def test_steps_must_match_duration():
     p = good_plan()
     p["days"][0]["duration_min"] = 90
     assert any("steps sum to 60 min" in e for e in run(p))
-
-
-def test_outdoor_needs_rideable_weather():
-    p = good_plan()
-    fc = [{"date": DATES[5], "temp_c": 1, "templow_c": -3, "precip_mm": 0, "wind_ms": 3, "condition": "sunny"}]
-    assert any("not rideable" in e for e in run(p, forecast=fc))
-    fc[0]["temp_c"] = 10
-    assert run(p, forecast=fc) == []
 
 
 def test_weekly_tss_cap_and_recovery():
