@@ -4,7 +4,8 @@ from __future__ import annotations
 import math
 from datetime import date
 
-LAT = 59.6  # Västerås / Mälardalen
+LAT = 59.6   # Västerås / Mälardalen
+LON = 16.55
 
 
 def phase(d: date) -> str:
@@ -34,8 +35,10 @@ def daylight(d: date, lat: float = LAT) -> tuple[float, str, str]:
         math.cos(math.radians(lat)) * math.cos(decl))
     cos_h = max(-1.0, min(1.0, cos_h))
     hours = 2 * math.degrees(math.acos(cos_h)) / 15
-    # Solar noon in Västerås ≈ 12:24 CET / 13:24 CEST (16.5°E; equation of time ignored)
-    noon = 12.4 + (1 if _is_dst(d) else 0)
+    # Solar noon: CET meridian is 15°E, Västerås ~16.55°E is ~6 min earlier; plus the equation of time.
+    b = 2 * math.pi * (n - 81) / 364
+    eot_min = 9.87 * math.sin(2 * b) - 7.53 * math.cos(b) - 1.5 * math.sin(b)
+    noon = 12 - (LON - 15) / 15 - eot_min / 60 + (1 if _is_dst(d) else 0)
     return round(hours, 1), _hm(noon - hours / 2), _hm(noon + hours / 2)
 
 
@@ -48,5 +51,5 @@ def _is_dst(d: date) -> bool:
 
 
 def _hm(h: float) -> str:
-    h = h % 24
-    return f"{int(h):02d}:{int(round((h % 1) * 60)) % 60:02d}"
+    m = round(h * 60) % 1440  # round in minutes so 18:59.6 carries to 19:00
+    return f"{m // 60:02d}:{m % 60:02d}"
