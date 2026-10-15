@@ -1,0 +1,15 @@
+name: test
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+      - run: uv venv --python 3.13 .venv && uv pip install -r requirements-dev.txt
+      - run: .venv/bin/ruff check training_coach tests tools
+      - run: .venv/bin/python -m pytest -q

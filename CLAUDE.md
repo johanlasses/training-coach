@@ -11,9 +11,13 @@ See README.md for the architecture and `training_coach/DOCS.md` for the user-fac
 TC_DATA_DIR=/tmp/tc-demo .venv/bin/python tools/seed_demo.py    # demo data, no Strava needed
 (cd training_coach && TC_DATA_DIR=/tmp/tc-demo ../.venv/bin/python -m uvicorn app.main:app --port 8099)
 .venv/bin/python tools/mobile_check.py                          # iPhone-size overflow check + screenshots
+.venv/bin/ruff check training_coach tests tools                 # bugs-only lint (no formatter: the style is compact on purpose)
 ```
 
-A project hook re-runs pytest after every edit under `training_coach/app/` or `tests/` and reports failures.
+Project hooks (`.claude/hooks/`): pytest after edits under `training_coach/app/` or `tests/`; ruff and the template rules
+(`{{ base }}` URLs, no inline grid styles) after each edit; blocks on plain `git push`, persisted git credentials and
+`options:` in `config.yaml`; a Stop reminder when templates/CSS changed without a `mobile_check.py` run.
+CI (`.github/workflows/test.yml`) runs ruff and pytest on push.
 
 ## Rules
 
@@ -35,9 +39,12 @@ A project hook re-runs pytest after every edit under `training_coach/app/` or `t
   Tests never hit real APIs.
 - **Charts:** use the colour tokens in `static/app.css` (the dataviz reference palette). No dual axes; TSB has its own chart.
 - After changing `metrics.py`, `coach.py` rules or prompts, or `analysis.py`, run the `training-science-reviewer` agent.
+- After changing `main.py`, `config.py`, templates or the Strava/HA/Zwift clients, run the `ha-addon-reviewer` agent.
+- When the deployed add-on misbehaves, use the `ha-logs` skill to get the traceback before guessing.
 
 ## MCP servers (`.mcp.json`)
 
 - `home-assistant`: HA's own MCP server. Needs `HA_TOKEN` (a long-lived token) exported in the shell; `HA_URL` defaults
   to `http://192.168.68.155:8123`. Use it to check `sensor.training_*` entities and notifications.
 - `playwright`: interactive browser via the installed Chrome. For layout checks, prefer `tools/mobile_check.py`.
+- `context7`: current library docs. Use it for FastAPI, anthropic 1.x and aiomqtt APIs instead of guessing from memory.

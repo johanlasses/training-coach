@@ -2,3 +2,12 @@
 pythonpath = ["training_coach"]
 testpaths = ["tests"]
 asyncio_mode = "auto"
+
+[tool.ruff]
+line-length = 120
+target-version = "py313"
+
+[tool.ruff.lint]
+# Bugs only (pyflakes, syntax, bugbear). No formatter: the code is deliberately compact.
+select = ["F", "E9", "B"]
+ignore = ["B905"]
