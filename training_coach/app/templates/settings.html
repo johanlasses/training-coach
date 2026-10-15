@@ -78,14 +78,55 @@
   {% endif %}
 </section>
 
+{% macro when(job) %}<small class="hint">{% if job.next is string %}{{ job.next }}{% elif job.next %}Next: {{ job.next.strftime('%a %-d %b %H:%M') }}{% else %}Off{% endif %}{% if job.last %} · last: {{ job.last }}{% endif %}</small>{% endmacro %}
 <section class="card">
-  <h2>Notifications</h2>
-  <p class="caption">A morning push with the day's session.</p>
+  <h2>Schedules</h2>
+  <p class="caption">Everything the add-on does on its own. Claude jobs cost tokens and are off until you switch them on.</p>
   <form method="post" action="{{ base }}/settings">
-    <label>Notify service <input name="notify_service" value="{{ cfg.notify_service }}" placeholder="notify.mobile_app_…">
-      <small>Leave empty to disable.</small></label>
+    <input type="hidden" name="_section" value="schedules">
+    <label>Strava sync <select name="sync_interval_min">
+      {% for mins, label in sync_intervals.items() %}<option value="{{ mins }}" {{ 'selected' if mins == cfg.sync_interval_min }}>{{ label }}</option>{% endfor %}
+      </select>{{ when(schedule.sync) }}</label>
+    <label class="inline"><input type="checkbox" name="zwift_refresh" {{ 'checked' if cfg.zwift_refresh }}> Daily Zwift login refresh {{ when(schedule.zwift) }}</label>
+    <p class="hint-row">Apple Health from Home Assistant: {{ when(schedule.health) }} <span class="muted">(local, set up on Profile)</span></p>
+    <h3>Morning notification</h3>
+    <div class="grid2 wide-first">
+      <label>Notify service <input name="notify_service" value="{{ cfg.notify_service }}" placeholder="notify.mobile_app_…">
+        <small>Leave empty to disable.</small></label>
+      <label>Time <input type="time" name="notify_time" value="{{ cfg.notify_time }}">{{ when(schedule.notify) }}</label>
+    </div>
+    <h3>Claude jobs</h3>
+    <label class="inline"><input type="checkbox" name="auto_plan" {{ 'checked' if cfg.auto_plan }}> Plan next week automatically</label>
+    <div class="grid2">
+      <label>Day <select name="auto_plan_day">{% for k, n in day_names.items() %}<option value="{{ k }}" {{ 'selected' if k == cfg.auto_plan_day }}>{{ n }}</option>{% endfor %}</select></label>
+      <label>Time <input type="time" name="auto_plan_time" value="{{ cfg.auto_plan_time }}">{{ when(schedule.plan) }}</label>
+    </div>
+    <label class="inline"><input type="checkbox" name="auto_analysis" {{ 'checked' if cfg.auto_analysis }}> Weekly analysis</label>
+    <div class="grid2">
+      <label>Day <select name="auto_analysis_day">{% for k, n in day_names.items() %}<option value="{{ k }}" {{ 'selected' if k == cfg.auto_analysis_day }}>{{ n }}</option>{% endfor %}</select></label>
+      <label>Time <input type="time" name="auto_analysis_time" value="{{ cfg.auto_analysis_time }}">{{ when(schedule.analysis) }}</label>
+    </div>
+    <p class="caption">The auto plan uses your default coach, skips weeks that already have a plan and sends a notification
+      when it's ready. Jobs only start in the 3 hours after their time.</p>
     <button>Save</button>
   </form>
+</section>
+
+<section class="card">
+  <h2>Claude usage</h2>
+  <p class="caption">Tokens per call type. Input includes cached tokens.</p>
+  {% for period, rows in usage.items() %}
+  <h3>{{ period }}</h3>
+  {% if rows %}
+  <table class="zones usage">
+    <tr class="muted"><td>Call</td><td class="num">Calls</td><td class="num">Input</td><td class="num">Output</td></tr>
+    {% for purpose, u in rows.items() %}
+    <tr><td>{{ purpose | capitalize }}</td><td class="num">{{ u.calls }}</td>
+      <td class="num">{{ '{:,}'.format(u.input_tokens or 0) }}</td><td class="num">{{ '{:,}'.format(u.output_tokens or 0) }}</td></tr>
+    {% endfor %}
+  </table>
+  {% else %}<p class="muted">No calls.</p>{% endif %}
+  {% endfor %}
 </section>
 
 <p class="footnote span-all">Keys and tokens are stored in this add-on's private data folder and are

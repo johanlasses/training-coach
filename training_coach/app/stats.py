@@ -66,11 +66,11 @@ def ftp_trend(acts: list[dict], today: date, cfg: Config, weeks: int = 12) -> li
     asc = sorted(acts, key=lambda a: a["start_date_local"])
     return [{"week": (today - timedelta(weeks=i)).isoformat(),
              "ftp": ftp_at(asc, today - timedelta(weeks=i), 0)[0]}
-            for i in range(weeks, -1, -2)] if not cfg.ftp_override else []
+            for i in range(weeks, -1, -2)] if not cfg.ftp_override else []  # eFTP only: compare it with tests
 
 
 def dashboard(acts: list[dict], today: date, cfg: Config) -> dict:
-    ftp, src = ftp_at(acts, today, cfg.ftp_override)
+    ftp, src = ftp_at(acts, today, cfg.ftp_override, cfg.ftp_tests)
     fit = fitness(acts, today)
     cur = fit[-1] if fit else {"ctl": 0, "atl": 0, "tsb": 0}
     return {
@@ -86,6 +86,14 @@ def dashboard(acts: list[dict], today: date, cfg: Config) -> dict:
         "curve365": power_curve(acts, today, 365),
         "zones28": zone_distribution(acts, today),
     }
+
+
+def maximal_effort(a: dict) -> bool:
+    """A test-like effort inside a ride: 20 min at ≥95%, 8 min at ≥105% or 5 min at ≥115% of the FTP the ride
+    was scored with."""
+    mmp, ftp = a.get("mmp") or {}, a.get("ftp_used") or 0
+    return bool(ftp) and ((mmp.get(1200) or 0) >= 0.95 * ftp or (mmp.get(480) or 0) >= 1.05 * ftp
+                          or (mmp.get(300) or 0) >= 1.15 * ftp)
 
 
 def snapshot(acts: list[dict], today: date, cfg: Config) -> dict:
@@ -121,6 +129,7 @@ def snapshot(acts: list[dict], today: date, cfg: Config) -> dict:
             "if": a["intensity"], "tss": a["tss"], "tss_source": a["tss_source"],
             "avg_hr": a["avg_hr"], "decoupling_pct": a.get("decoupling"),
             "best_5min_w": (a.get("mmp") or {}).get(300), "best_20min_w": (a.get("mmp") or {}).get(1200),
+            "maximal_effort": maximal_effort(a),
         } for a in sorted(recent, key=lambda a: a["start_date_local"])],
         "season": {"phase": season.phase(today), "description": season.PHASE_TEXT[season.phase(today)],
                    "daylight_hours": hours, "sunrise": sunrise, "sunset": sunset},

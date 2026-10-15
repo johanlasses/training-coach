@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% from "_macros.html" import note_list with context %}
 {% set page = 'profile' %}
 {% block content %}
 <div class="form-page">
@@ -32,11 +33,23 @@
   <div class="grid3">
     <label>Weight (kg) <input name="weight_kg" value="{{ cfg.weight_kg }}" inputmode="decimal"></label>
     <label>FTP override (W) <input name="ftp_override" value="{{ cfg.ftp_override or '' }}" inputmode="numeric" placeholder="auto">
-      <small>Leave empty to use the eFTP estimated from your best efforts.</small></label>
+      <small>Leave empty to use your latest test (for 12 weeks) or the eFTP estimated from your best efforts.</small></label>
     <label>Threshold HR (bpm) <input name="lthr" value="{{ cfg.lthr }}" inputmode="numeric">
       <small>Used for load on rides without power.</small></label>
   </div>
 </section>
+
+{% if cfg.ftp_tests %}
+<section class="card">
+  <h2>FTP tests</h2>
+  <p class="caption">Each result is your FTP from its date for 12 weeks. Rides before it keep their old FTP.</p>
+  {% for t in cfg.ftp_tests | sort(attribute='date', reverse=True) %}
+  <div class="note"><div>{{ t.date | day_label }} · <b>{{ t.ftp }} W</b> <span class="facts">{{ t.protocol | replace('_', ' ') }}</span></div>
+    <button class="secondary" formaction="{{ base }}/ftp/tests/delete?date={{ t.date }}" formnovalidate
+            onclick="return confirm('Remove this test result?')" aria-label="Remove test result">✕</button></div>
+  {% endfor %}
+</section>
+{% endif %}
 
 <section class="card">
   <h2>Availability</h2>
@@ -52,7 +65,25 @@
     <label>Max minutes, weekends <input name="max_weekend_minutes" value="{{ cfg.max_weekend_minutes }}" inputmode="numeric"></label>
   </div>
 </section>
+<section class="card">
+  <h2>Apple Health</h2>
+  <p class="caption">Resting HR, HRV and sleep tell the coach how recovered you are. Turn on the Apple Health sensors in
+    the Home Assistant iPhone app (Settings → Companion App → Sensors), then pick them here. Read hourly from Home Assistant.</p>
+  {% if health_options is none %}<p class="caption"><b>Couldn't read the sensor list from Home Assistant.</b> You can still type entity ids.</p>{% endif %}
+  <datalist id="health-sensors">{% for o in health_options or [] %}<option value="{{ o.entity_id }}">{{ o.label }}</option>{% endfor %}</datalist>
+  {% for m, (label, unit) in health_metrics.items() %}
+  <label>{{ label }}
+    <input name="health_{{ m }}_entity" value="{{ cfg['health_' ~ m ~ '_entity'] }}" list="health-sensors" placeholder="sensor.…" autocomplete="off">
+    {% if health_latest[m] %}<small>Latest {{ '%g' | format(health_latest[m].latest) }} {{ unit }} on {{ health_latest[m].latest_date | day_label }} ·
+      7-day mean {{ health_latest[m].mean_7d }}{% if health_latest[m].baseline_mean %}, baseline {{ health_latest[m].baseline_mean }}{% endif %}</small>{% endif %}</label>
+  {% endfor %}
+</section>
 <div class="form-actions"><button>Save profile</button></div>
 </form>
+<section class="card notes-card">
+  <h2>Coach notes</h2>
+  <p class="caption">Saved from the <a href="{{ base }}/coach">Coach</a> chat. Every plan and analysis takes them into account until they end.</p>
+  {{ note_list(notes, 'profile') }}
+</section>
 </div>
 {% endblock %}

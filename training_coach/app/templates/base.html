@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   {% set busy = jobs.values() | selectattr("running") | list %}
-  {% if busy %}<meta http-equiv="refresh" content="5">{% endif %}
+  {% if busy and page != 'coach' %}<meta http-equiv="refresh" content="5">{% endif %}
   <title>Training Coach</title>
   <link rel="stylesheet" href="{{ base }}/static/app.css">
 </head>
@@ -14,6 +14,7 @@
   <nav>
     <a href="{{ base }}/" class="{{ 'active' if page == 'home' }}">Overview</a>
     <a href="{{ base }}/plan" class="{{ 'active' if page == 'plan' }}">Plan</a>
+    <a href="{{ base }}/coach" class="{{ 'active' if page == 'coach' }}">Coach</a>
     <a href="{{ base }}/analysis" class="{{ 'active' if page == 'analysis' }}">Analysis</a>
     <a href="{{ base }}/profile" class="{{ 'active' if page == 'profile' }}">Profile</a>
     <a href="{{ base }}/settings" class="{{ 'active' if page == 'settings' }}">Settings</a>

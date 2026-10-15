@@ -3,7 +3,8 @@
 A Home Assistant add-on for road and gravel training. It pulls rides from Strava (Zwift rides arrive there
 automatically), shows a Strava-style feed with load and power statistics, and uses Claude to plan your week
 (Zwift workouts as `.zwo`, or outdoor rides when the season and daylight allow) and to write an in-depth
-analysis, on demand, with a choice of three coaching styles.
+analysis, with a choice of three coaching styles. You can chat with the coach to change the week, and it can use
+Apple Health recovery data from the Home Assistant iPhone app.
 
 ## Install
 
@@ -21,6 +22,13 @@ Setup steps are in [training_coach/DOCS.md](training_coach/DOCS.md).
 - **Coach** (`app/coach.py`): Claude returns a schema-constrained weekly plan. Code then checks availability, hard-day rules,
   weekly TSS vs. ramp limits and workout step totals. A failing plan is retried once with the errors.
 - **Analysis** (`app/analysis.py`): a Markdown report built from a JSON snapshot of the athlete (`app/stats.py`).
+- **Chat** (`app/chat.py`): a structured reply with optional plan changes (merged into the active plan, validated, and
+  applied by the user as a new plan version) and coach notes (`coach_notes` table). The notes feed every later snapshot.
+- **FTP tests** (`app/ftptest.py`): plan days carry `test_protocol`, and the estimate comes from the test ride's best efforts.
+- **Apple Health** (`app/health.py`): reads the HA iOS app's HealthKit sensors through the Supervisor API, stores daily
+  values (`health_daily`), and adds 7- and 28-day trends to the snapshot.
+- **Scheduler** (`State.scheduler` in `app/main.py`): a one-minute tick with configurable slots. Every Claude call is logged
+  in `llm_calls` for the usage table.
 - **UI**: FastAPI and Jinja behind HA ingress, Chart.js (vendored), with no build step.
 
 ## Develop

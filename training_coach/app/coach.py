@@ -5,7 +5,7 @@ import json
 import logging
 from datetime import date, datetime, timedelta
 
-from . import coaches, llm, workouts
+from . import coaches, ftptest, llm, workouts
 from .config import Config
 from .db import DB
 
@@ -68,9 +68,11 @@ PLAN_SCHEMA = {
                     "terrain": {"type": "string", "description": "Outdoor only: route/terrain hint, else empty"},
                     "steps": {"type": "array", "items": STEP_SCHEMA,
                               "description": "Zwift only: full workout; empty for rest/outdoor"},
+                    "test_protocol": {"type": "string", "enum": ["none", *ftptest.PROTOCOLS],
+                                      "description": "The FTP test this session is; none for training sessions"},
                 },
                 "required": ["date", "kind", "title", "description", "duration_min", "intensity",
-                             "target_tss", "bike", "terrain", "steps"],
+                             "target_tss", "bike", "terrain", "steps", "test_protocol"],
                 "additionalProperties": False,
             },
         },
@@ -95,8 +97,23 @@ Hard rules, whichever coaching style you follow:
 at most one hard session and no VO2max/anaerobic. Openers (under 5 min in total above 105% FTP) are labelled endurance.
 - A day counts as hard if it has ≥10 min at ≥88% FTP or ≥5 min above 105% FTP (whatever you label it), \
 an intensity of threshold/VO2max/anaerobic, or is an outdoor "mixed" ride. Rides already done count too \
-(IF ≥ 0.85 is hard), including yesterday's.
+(IF ≥ 0.85 or maximal_effort is hard), including yesterday's.
 - Each day's duration must fit within the availability minutes for that weekday (0 = rest day).
+- snapshot.coach_notes are things the athlete told you in chat. Absence dates are rest days. Before an event \
+note, shape the days so they arrive fresh (an easy day or openers the day before, no hard session in the last \
+2 days), plan the event day itself as the ride (it may run past the availability limit), and make the day after \
+rest or easy. For the main goal event, taper over 7-10 days: volume down ~40-60%, keep short intensity and the \
+same number of rides. Injury notes override the progression: back off until they end. Illness: no training \
+with fever or symptoms below the neck; after the note ends, at least 2-3 easy days before any hard session, \
+and after a fever roughly as many easy days as days sick. A note asking for a test counts as the athlete asking.
+- snapshot.health, when present, holds Apple Health trends: the last 7 days against a baseline of the 28 days \
+before them, with the days of data in each. Read them as a readiness signal, never from a single day, and only \
+when the 7 days hold at least 5 days of data and the baseline at least 14. Signals: HRV change_pct about -10% \
+or lower, resting HR change +4 bpm or more, 7-day sleep under ~6.5 h. Two signals together: swap the next hard \
+session for endurance or rest and say why. One signal: keep the session but shorten it or cap it at the low \
+end of its targets, and mention it. A sharp HRV rise during heavy load isn't freshness. Weight is only for \
+W/kg, and Apple's VO2 max comes from walking and running, so neither is a readiness signal. Missing data means \
+nothing.
 - Choose outdoor rides from the season and daylight: weekend outdoor rides when the season allows, weekday \
 outdoor rides only with daylight after work (sunset well after 18:00). Otherwise use Zwift. The athlete swaps \
 an outdoor ride for Zwift themselves if the weather turns, so give outdoor days a Zwift-friendly purpose.
@@ -112,6 +129,12 @@ automatically, so don't write "rep 2 of 5". Never tell the rider to exceed a ste
 hard efforts, cue holding the target, form and pacing; on easy or recovery steps, cue staying easy, fuelling \
 and cadence, not effort.
 - target_tss: your estimate for the session (rest = 0).
+- FTP tests: plan one only when the athlete asks for it, or when your philosophy says a test is due and \
+snapshot.ftp_tests shows no completed test (done) in the last 4 weeks. Use the protocol in your philosophy, set \
+test_protocol, and make the day before rest or easy. A test day counts as a hard day; in a recovery week the \
+test is the one hard session. Build all-out time trials (20-min, 8-min) as freeride steps so ERG doesn't cap \
+them; the ramp test stays as steady 1-minute ERG steps. Explain the pacing in the description and step text. \
+Never plan a test in the first days back after illness or an absence.
 - Write titles and descriptions in English, concise and specific — like a coach's note, not marketing.
 {style_rules}
 Follow this coaching philosophy for everything else — intensity distribution, session choice, weekly \
@@ -130,7 +153,7 @@ def system_prompt(c: coaches.Coach, rules: dict) -> str:
 def is_hard_day(d: dict) -> bool:
     if d["kind"] == "rest":
         return False
-    if d["intensity"] in HARD:
+    if d["intensity"] in HARD or d.get("test_protocol", "none") != "none":
         return True
     if d["kind"] == "zwift":
         return workouts.is_hard(d["steps"])
@@ -143,12 +166,17 @@ def hard_errors(days: list[dict], done_rides: list[dict], rules: dict, recovery:
     max_hard, max_run = rules["max_hard_sessions"], rules["max_consecutive_hard"]
     if recovery:
         max_hard, max_run = min(max_hard, 1), 1
-        errors += [f"{d['date']}: no {d['intensity']} in a recovery week" for d in days
-                   if d["kind"] != "rest" and d["intensity"] in {"vo2max", "anaerobic"}]
+        errors += [f"{d['date']}: no {d['intensity']} in a recovery week" for d in days  # a test is the one touch
+                   if d["kind"] != "rest" and d["intensity"] in {"vo2max", "anaerobic"}
+                   and d.get("test_protocol", "none") == "none"]
     hard: dict[str, bool] = {}
-    for r in done_rides:
-        hard[r["date"]] = hard.get(r["date"], False) or (r.get("if") or 0) >= 0.85
+    for r in done_rides:  # whole-ride IF misses many test rides, hence maximal_effort
+        hard[r["date"]] = hard.get(r["date"], False) or (r.get("if") or 0) >= 0.85 or bool(r.get("maximal_effort"))
     hard |= {d["date"]: is_hard_day(d) for d in days}
+    for d in days:
+        before = (date.fromisoformat(d["date"]) - timedelta(days=1)).isoformat()
+        if d.get("test_protocol", "none") != "none" and hard.get(before):
+            errors.append(f"{d['date']}: the day before an FTP test must be rest or easy")
     week_start = (date.fromisoformat(days[0]["date"]) - timedelta(days=date.fromisoformat(days[0]["date"]).weekday()))
     n = sum(h for day_iso, h in hard.items() if day_iso >= week_start.isoformat())
     if n > max_hard:
@@ -181,20 +209,24 @@ def block_week(db: DB, week_start: date) -> int:
 
 
 def validate(plan: dict, dates: list[str], cfg: Config, ctl: float, done_tss: float, recovery: bool,
-             rules: dict | None = None, done_rides: list[dict] = ()) -> list[str]:
+             rules: dict | None = None, done_rides: list[dict] = (), notes: list[dict] = ()) -> list[str]:
     """Hard checks the plan must pass. Also normalises Zwift TSS to the profile estimate (in place).
 
-    done_rides: rides from yesterday and earlier this week, for the hard-day rules."""
+    done_rides: rides from yesterday and earlier this week, for the hard-day rules.
+    notes: coach notes. Absence days must be rest; event days may run past the availability limit."""
     rules = rules or coaches.get("nextlevel").rules(cfg.athlete_level)
     errors = []
     days = plan["days"]
     if [d["date"] for d in days] != dates:
         errors.append(f"days must be exactly these dates in order: {dates}")
         return errors
+    away, events = note_days(notes, "absence"), note_days(notes, "event")
     for d in days:
         wd = date.fromisoformat(d["date"]).weekday()
         limit = cfg.max_minutes(wd)
-        if d["kind"] != "rest" and d["duration_min"] > limit:
+        if d["date"] in away and d["kind"] != "rest":
+            errors.append(f"{d['date']}: the athlete is away (coach note), so this must be a rest day")
+        if d["kind"] != "rest" and d["duration_min"] > limit and d["date"] not in events:
             errors.append(f"{d['date']}: {d['duration_min']} min exceeds availability {limit} min")
         if d["kind"] == "zwift":
             if not d["steps"]:
@@ -212,7 +244,9 @@ def validate(plan: dict, dates: list[str], cfg: Config, ctl: float, done_tss: fl
                 if s["type"] == "intervals" and (s["repeat"] < 1 or s["on_s"] < 5):
                     errors.append(f"{d['date']}: intervals need repeat ≥ 1 and on_s ≥ 5")
                     break
-            d["target_tss"] = round(workouts.estimated_tss(d["steps"]))
+            protocol = d.get("test_protocol", "none")
+            d["target_tss"] = round(workouts.estimated_tss(d["steps"]) if protocol == "none"
+                                    else ftptest.estimated_tss(protocol, d["steps"]))
         elif d["steps"]:
             d["steps"] = []
         if d["kind"] == "rest":
@@ -226,6 +260,45 @@ def validate(plan: dict, dates: list[str], cfg: Config, ctl: float, done_tss: fl
     return errors
 
 
+def note_days(notes: list[dict], kind: str) -> set[str]:
+    out = set()
+    for n in notes:
+        if n["kind"] == kind:
+            day, end = date.fromisoformat(n["start"]), date.fromisoformat(n["end"])
+            while day <= end:
+                out.add(day.isoformat())
+                day += timedelta(days=1)
+    return out
+
+
+def done_this_week(snapshot: dict, week_start: date, first: date) -> tuple[list[dict], float, list[dict]]:
+    """(rides done this week before `first`, their TSS, rides from yesterday on for the back-to-back rule)."""
+    done = [r for r in snapshot["recent_rides"] if week_start.isoformat() <= r["date"] < first.isoformat()]
+    since = min(week_start, first - timedelta(days=1)).isoformat()  # yesterday counts for back-to-back days
+    done_rides = [r for r in snapshot["recent_rides"] if since <= r["date"] < first.isoformat()]
+    return done, sum(r["tss"] or 0 for r in done), done_rides
+
+
+async def run_validated(cfg: Config, db: DB, system: str, messages: list[dict], schema: dict, check, *,
+                        purpose: str, effort: str = "high", max_tokens: int = 32000) -> tuple[dict, list[str]]:
+    """Ask for structured output, run `check(result) -> errors`, and give the model one round to fix them.
+    Returns the last result and the errors it still has."""
+    result, errors = {}, []
+    for attempt in range(2):
+        msg = await llm.run(cfg.anthropic_api_key, system, messages, schema=schema, effort=effort,
+                            max_tokens=max_tokens, db=db, purpose=purpose)
+        result = json.loads(llm.text_of(msg))
+        errors = check(result)
+        if not errors or attempt == 1:
+            break
+        log.info("%s attempt %d failed validation: %s", purpose, attempt + 1, errors)
+        messages = messages + [
+            {"role": "assistant", "content": msg.content},
+            {"role": "user", "content": "That failed these checks; return a corrected full response:\n- " + "\n- ".join(errors)},
+        ]
+    return result, errors
+
+
 async def generate_plan(db: DB, cfg: Config, snapshot: dict, week_start: date, today: date,
                         coach_key: str | None = None) -> int:
     """Plan from max(today, week_start) through Sunday. Returns the stored plan id."""
@@ -233,10 +306,7 @@ async def generate_plan(db: DB, cfg: Config, snapshot: dict, week_start: date, t
     dates = [(first + timedelta(days=i)).isoformat() for i in range((week_start + timedelta(days=6) - first).days + 1)]
     bw = block_week(db, week_start)
     recovery = bw == 4
-    done = [r for r in snapshot["recent_rides"] if week_start.isoformat() <= r["date"] < first.isoformat()]
-    done_tss = sum(r["tss"] or 0 for r in done)
-    since = min(week_start, first - timedelta(days=1)).isoformat()  # yesterday counts for back-to-back days
-    done_rides = [r for r in snapshot["recent_rides"] if since <= r["date"] < first.isoformat()]
+    done, done_tss, done_rides = done_this_week(snapshot, week_start, first)
     c = coaches.get(coach_key or cfg.default_coach)
     weeks = weeks_with_coach(db, c.key, week_start)
     rules = c.rules(cfg.athlete_level, weeks)
@@ -253,21 +323,10 @@ async def generate_plan(db: DB, cfg: Config, snapshot: dict, week_start: date, t
     messages = [{"role": "user", "content": (
         f"Plan these days: {', '.join(dates)}. This is week {bw} of the 4-week block "
         f"({'recovery' if recovery else 'build'} week).\n\n```json\n{json.dumps(request, indent=1)}\n```")}]
-
-    warnings: list[str] = []
-    plan = None
-    for attempt in range(2):
-        msg = await llm.run(cfg.anthropic_api_key, system_prompt(c, rules), messages, schema=PLAN_SCHEMA, effort="high")
-        plan = json.loads(llm.text_of(msg))
-        warnings = validate(plan, dates, cfg, snapshot["load"]["ctl"], done_tss, recovery, rules, done_rides)
-        if not warnings:
-            break
-        log.info("Plan attempt %d failed validation: %s", attempt + 1, warnings)
-        messages += [
-            {"role": "assistant", "content": msg.content},
-            {"role": "user", "content": "The plan failed these checks; return a corrected full plan:\n- "
-                                        + "\n- ".join(warnings)},
-        ]
+    plan, warnings = await run_validated(
+        cfg, db, system_prompt(c, rules), messages, PLAN_SCHEMA, purpose="plan",
+        check=lambda p: validate(p, dates, cfg, snapshot["load"]["ctl"], done_tss, recovery, rules, done_rides,
+                                 snapshot.get("coach_notes", [])))
     plan["block_week"] = bw
     return db.save_plan(week_start.isoformat(), datetime.now().isoformat(timespec="seconds"),
                         llm.MODEL, plan, warnings, c.key)

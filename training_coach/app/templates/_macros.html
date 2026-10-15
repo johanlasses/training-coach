@@ -30,3 +30,13 @@
   {%- set labels = {'done': 'Done', 'partial': 'Partly done', 'missed': 'Missed', 'extra': 'Unplanned ride', 'rest': 'Rest', 'upcoming': 'Upcoming'} -%}
   <span class="status-pill s-{{ s }}"><span class="icon">{{ icons[s] }}</span>{{ labels[s] }}</span>
 {%- endmacro %}
+
+{% macro note_list(notes, origin='coach') %}
+  {% for n in notes %}
+  <div class="note">
+    <div><span class="facts">{{ n.kind | capitalize }} · {{ n.start | day_label }}{% if n.end != n.start %} → {{ n.end | day_label }}{% endif %}</span><br>{{ n.text }}</div>
+    <form method="post" action="{{ base }}/notes/{{ n.id }}/delete" onsubmit="return confirm('Delete this note?')"><input type="hidden" name="from" value="{{ origin }}">
+      <button class="secondary" aria-label="Delete note">✕</button></form>
+  </div>
+  {% else %}<p class="muted flush">None yet. Tell the coach about trips, races or injuries and it keeps them in mind.</p>{% endfor %}
+{% endmacro %}

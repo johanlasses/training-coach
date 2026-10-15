@@ -71,6 +71,18 @@
         {% endfor %}
         </ol></details>
       {% endif %}
+      {% if dd in tests %}{% set ftp, basis = tests[dd] %}
+      <div class="test-result">
+        <p class="flush"><b>Estimated FTP {{ ftp }} W</b> <span class="facts">· {{ basis }}</span></p>
+        {% if dd not in applied_tests %}
+        <form method="post" action="{{ base }}/ftp/apply">
+          <input type="hidden" name="ftp" value="{{ ftp }}"><input type="hidden" name="date" value="{{ dd }}">
+          <input type="hidden" name="protocol" value="{{ d.test_protocol }}">
+          <input type="hidden" name="week" value="{{ week.isoformat() }}">
+          <button class="secondary">Set as FTP</button></form>
+        {% else %}<p class="facts">✓ Your FTP from this day on</p>{% endif %}
+      </div>
+      {% endif %}
       {% for a in by_day.get(dd, []) %}
         <p class="facts">Ridden: <a href="{{ base }}/activity/{{ a.id }}">{{ a.name }}</a> ·
           {{ a.moving_time | duration }} · TSS {{ (a.tss or 0) | round | int }}</p>

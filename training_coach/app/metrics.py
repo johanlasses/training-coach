@@ -6,7 +6,7 @@ from __future__ import annotations
 
 from datetime import date, timedelta
 
-MMP_DURATIONS = [5, 15, 30, 60, 120, 300, 600, 1200, 1800, 3600]
+MMP_DURATIONS = [5, 15, 30, 60, 120, 300, 480, 600, 1200, 1800, 3600]  # 480 s: the CTS field test
 HIST_BIN_W = 25
 CTL_DAYS = 42
 ATL_DAYS = 7

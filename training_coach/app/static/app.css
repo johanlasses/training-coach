@@ -188,9 +188,36 @@ table.zones td.num { width: 90px; text-align: right; white-space: nowrap; }
 .form-page .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 0 16px; }
 .form-page .grid2.wide-first { grid-template-columns: 2fr 1fr; }
 .form-page .grid3 { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 0 16px; }
+.form-page h3 { font-size: 14px; margin: 16px 0 8px; }
+.form-page label.inline small.hint { display: inline; margin: 0 0 0 4px; }
+table.usage { margin-bottom: 8px; }
+.form-page .hint-row { font-size: 14px; margin: 0 0 12px; }
+.form-page .hint-row small.hint { display: inline; }
+table.usage td.num { width: auto; }
 .form-page .days { display: flex; flex-wrap: wrap; gap: 0 12px; margin-bottom: 4px; }
 .form-page .days label.inline { margin-right: 0; }
 @media (max-width: 700px) { .form-page .grid2, .form-page .grid2.wide-first, .form-page .grid3 { grid-template-columns: 1fr; } }
+.test-result { display: flex; flex-wrap: wrap; gap: 6px 12px; align-items: center; margin: 8px 0; }
+/* Coach chat */
+.chat { display: flex; flex-direction: column; gap: 10px; margin-bottom: 16px; }
+.msg { max-width: 85%; padding: 10px 14px; border-radius: 12px; border: 1px solid var(--border); background: var(--surface-1); }
+.msg.user { align-self: flex-end; background: var(--grid); }
+.msg-text { white-space: pre-wrap; overflow-wrap: anywhere; }
+.msg-meta { font-size: 11px; color: var(--text-muted); margin-top: 4px; }
+.msg .facts, .note .facts { font-size: 13px; color: var(--text-secondary); margin: 6px 0 0; }
+.proposal { margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--border); font-size: 14px; }
+.proposal ul { margin: 6px 0 8px; padding-left: 18px; }
+.proposal li { margin-bottom: 4px; }
+.proposal s { color: var(--text-muted); }
+.chat-form { display: flex; gap: 10px; align-items: flex-end; }
+.chat-form textarea { flex: 1; min-width: 0; font: inherit; font-size: 15px; padding: 8px 10px; border-radius: var(--radius-sm);
+  border: 1px solid var(--axis); background: var(--page); color: var(--text-primary); resize: vertical; }
+.note { display: flex; gap: 10px; justify-content: space-between; align-items: flex-start; padding: 8px 0;
+  border-bottom: 1px solid var(--border); font-size: 14px; }
+.note .facts { margin: 0; }
+.note button { height: 28px; padding: 0 8px; }
+.form-page .notes-card { margin-top: 16px; }
+@media (max-width: 700px) { .msg { max-width: 100%; } .chat-form { flex-wrap: wrap; } .chat-form button { width: 100%; } }
 .steps-list { padding-left: 20px; margin: 0; }
 .steps-list li { margin-bottom: 18px; }
 .steps-list li.disabled { opacity: .55; }

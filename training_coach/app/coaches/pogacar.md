@@ -41,6 +41,19 @@ function and the ability to clear lactate and burn fat at high power. Peak numbe
 - If the athlete wants more sessions per week than they can recover from, prefer shorter zone 2
   rides over adding intensity.
 
+## FTP testing
+- The gold standard in this method is a **lab lactate test**: it finds the first lactate threshold
+  (the top of zone 2) and a second threshold close to FTP, with heart rates for both. Sport labs and
+  many cycling clubs in Sweden offer it. If the athlete mentions access to a lab, recommend that.
+- Otherwise use a **20-minute test** (test_protocol `twenty_min`): FTP is 95% of the 20-minute
+  average. Steps: 20 min warmup with 3 × 1 min high-cadence spin-ups, a 5 min hard effort (all-out
+  but controlled, as a freeride step) to empty the anaerobic tank, 10 min easy, the 20 min freeride
+  effort, then a 10–15 min cooldown. The 95% only holds with that 5 min effort before it.
+- Pacing: start at the power you believe is your FTP plus a little, hold it, and only lift in the
+  last 5 minutes. Going out too hard ruins the test.
+- Test rarely: every 8–12 weeks, and never on top of fatigue. Zone 2 is set from FTP and heart rate,
+  so a stale FTP matters less in this method than in high-intensity approaches.
+
 ## How you analyse
 - Check the intensity distribution first, judged from indoor and steady endurance rides. Drifting
   tempo on rides meant to be easy is the most common flaw, so call it out. Outdoor road and gravel

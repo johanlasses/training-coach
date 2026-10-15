@@ -84,8 +84,44 @@ for i in range(7):
     else:
         days.append({"date": d, "kind": "rest", "title": "Rest", "description": "Off the bike.", "duration_min": 0,
                      "intensity": "recovery", "target_tss": 0, "bike": "none", "terrain": "", "steps": []})
-db.save_plan(ws.isoformat(), datetime.now().isoformat(timespec="seconds"), "demo",
-             {"week_focus": "Build aerobic base", "rationale": "Demo plan.", "days": days, "block_week": 2}, [])
+plan_id = db.save_plan(ws.isoformat(), datetime.now().isoformat(timespec="seconds"), "demo",
+                       {"week_focus": "Build aerobic base", "rationale": "Demo plan.", "days": days, "block_week": 2}, [])
+
+# Coach chat with a pending proposal, coach notes, Apple Health values and Claude usage
+now = datetime.now().isoformat(timespec="seconds")
+later = [d for d in days if d["date"] >= today.isoformat()]
+db.add_chat(now, "user", "nextlevel", "I'm away on a work trip for two days later this week. Also, there's an 80 km gravel "
+            "race in three weeks I'd like to ride well, though my main goal stays the same.")
+db.add_chat(now, "assistant", "nextlevel", "Good to know. I've moved the quality session so it doesn't fall on your travel "
+            "days, and saved the race so the next weeks build towards it with a light taper.\n\nKeep the rides on "
+            "either side of the trip easy: travel is fatigue too.",
+            {"plan_id": plan_id, "days": [dict(d, kind="rest", title="Travel day: rest", duration_min=0, steps=[])
+                                          for d in later[:2]]} if later else None, [],
+            [f"Gravel race 80 km ({(today + timedelta(days=21)).strftime('%-d %b')})"])
+db.add_note(now, "event", (today + timedelta(days=21)).isoformat(), (today + timedelta(days=21)).isoformat(),
+            "B-race: 80 km gravel, wants to ride it well")
+db.add_note(now, "absence", (today + timedelta(days=2)).isoformat(), (today + timedelta(days=3)).isoformat(), "Work trip")
+for i in range(28):
+    d = (today - timedelta(days=i)).isoformat()
+    db.set_health(d, "rhr", 50 + random.randint(-2, 3), "bpm")
+    db.set_health(d, "hrv", 58 + random.randint(-8, 8), "ms")
+    db.set_health(d, "sleep", round(7 + random.uniform(-1, 0.8), 2), "h")
+
+
+class _Usage:
+    def __init__(self, i, o):
+        self.input_tokens, self.output_tokens, self.cache_read_input_tokens = i, o, 0
+
+
+class _Msg:
+    model = "claude-opus-5-5"
+
+    def __init__(self, i, o):
+        self.usage = _Usage(i, o)
+
+
+for purpose, i, o in [("plan", 14200, 9800), ("analysis", 9100, 4200), ("chat", 16300, 1100)]:
+    db.log_llm(now, purpose, _Msg(i, o))
 db.save_analysis(datetime.now().isoformat(timespec="seconds"), "manual", "demo",
                  "## Current form\nDemo report.\n\n## Limiters\n- 20-min power lags the 5-min power.\n")
 print(f"Seeded {len(db.activities())} rides into {data / 'training.db'}")

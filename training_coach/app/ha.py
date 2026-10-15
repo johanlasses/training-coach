@@ -1,4 +1,4 @@
-"""Home Assistant access: notifications via the Supervisor proxy, sensors via MQTT."""
+"""Home Assistant access: notifications and state reads via the Supervisor proxy, sensors via MQTT."""
 from __future__ import annotations
 
 import json
@@ -19,8 +19,8 @@ def available() -> bool:
     return bool(HA_URL and HA_TOKEN)
 
 
-async def _call(method: str, path: str, body: dict | None = None) -> httpx.Response:
-    async with httpx.AsyncClient(timeout=20) as c:
+async def _call(method: str, path: str, body: dict | None = None, timeout: float = 20) -> httpx.Response:
+    async with httpx.AsyncClient(timeout=httpx.Timeout(timeout, connect=3)) as c:
         r = await c.request(method, f"{HA_URL}/api{path}", json=body,
                             headers={"Authorization": f"Bearer {HA_TOKEN}"})
         r.raise_for_status()
@@ -35,6 +35,27 @@ async def notify(service: str, title: str, message: str) -> None:
         await _call("POST", f"/services/{domain}/{name}", {"title": title, "message": message})
     except httpx.HTTPError as e:
         log.warning("Notify failed: %s", e)
+
+
+async def states() -> list[dict]:
+    """All entity states, or [] when HA isn't reachable."""
+    if not available():
+        return []
+    try:
+        return (await _call("GET", "/states", timeout=8)).json()
+    except (httpx.HTTPError, ValueError) as e:
+        log.warning("Reading HA states failed: %s", e)
+        return []
+
+
+async def state(entity_id: str) -> dict | None:
+    if not available() or not entity_id:
+        return None
+    try:
+        return (await _call("GET", f"/states/{entity_id}", timeout=8)).json()
+    except (httpx.HTTPError, ValueError) as e:
+        log.warning("Reading %s failed: %s", entity_id, e)
+        return None
 
 
 # --- MQTT sensors --------------------------------------------------------

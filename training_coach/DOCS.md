@@ -31,14 +31,61 @@ notification. **Use this plan** switches it. Each coach's philosophy lives in `a
 
 The first sync imports 12 months of rides. Power detail (NP, power curve, zones) is fetched gradually so Strava's rate limits aren't hit, which can take a few hours.
 
+## Coach chat
+
+The **Coach** tab is a chat with the coach of this week's active plan. Ask about your training, or tell it what's
+coming up: "I'm away Thursday to Saturday", "there's an 80 km gravel race on 8 November", "add an FTP test".
+
+- **Plan changes** come as a proposal listing each day before and after. Nothing changes until you press
+  **Apply to plan**. That saves a new version of the week's plan and makes it the active one. The change is checked
+  against the same rules as a generated plan, and any rule it still breaks is shown next to it.
+- **Coach notes** are things that matter beyond this week: trips, secondary events, injuries. The coach saves them on
+  its own. They're listed on the Coach and Profile pages, can be deleted there, and every later plan and analysis
+  takes them into account until they end. Your main goal stays the one on **Profile**.
+- Each message sends the last 20 messages plus your training data. **Clear chat** starts over and keeps the notes.
+
+## FTP tests
+
+Each coach has its own test, and plans it when you ask, or when a test is due under its approach:
+
+- **Carmichael**: the CTS Field Test, 2 × 8 min all-out. FTP is 90% of the better effort.
+- **Next Level**: the ramp test, 1-minute steps until you can't hold the target. FTP is 75% of your best minute.
+  Zwift's built-in *Ramp Test* works too.
+- **Pogačar (San Millán)**: a lab lactate test if you have access to one, otherwise a 20-minute test. FTP is
+  95% of the 20 minutes.
+
+Ride the all-out efforts with ERG off. Once the ride has synced, the test day on **Plan** shows the estimated FTP
+and a **Set as FTP** button. That sets the FTP override on Profile, which stays until you clear it.
+
+## Apple Health
+
+With Apple Health data, the coach can see how recovered you are: resting heart rate, HRV, sleep, weight and VO2 max.
+It eases off when HRV drops or resting HR rises over several days, not on a single bad night.
+
+1. In the Home Assistant iPhone app (2026.8 or later): **Settings → Companion App → Sensors → Apple Health**.
+   Enable the sensors you want and allow access in the iOS prompt. The feature is marked *Labs*.
+2. In the add-on, on **Profile → Apple Health**, pick the sensors from the list.
+
+The add-on reads them from Home Assistant every hour and keeps one value per day. The iPhone app stamps a value
+with the time it was sent, not the time it was measured, so a value counts for the day it was read.
+If the iPhone app doesn't offer a metric, an app like *Health Auto Export* can push it to Home Assistant as a
+sensor, and you can pick that sensor instead.
+
 ## What runs automatically
 
-Plans and analyses never run on their own. Claude is only called when you click.
+You control all of it on **Settings → Schedules**. Claude jobs are off until you switch them on.
 
-| When | What |
+| Default | What |
 |---|---|
-| Every 30 min | Sync new rides from Strava |
+| Every 30 min | Sync new rides from Strava (15 min to 4 h, or off) |
+| Daily | Refresh the Zwift login |
+| Hourly | Read the Apple Health sensors from Home Assistant, if set up (local, free) |
 | Daily 07:00 | Push today's session to your notify service |
+| Off | Plan next week with your default coach (e.g. Sunday 20:00). Weeks that already have a plan are skipped |
+| Off | Weekly analysis (e.g. Monday 07:00) |
+
+A scheduled job only starts in the 3 hours after its time, so a restart in the afternoon doesn't run the morning's jobs.
+**Claude usage** on the same page shows calls and tokens per plan, analysis and chat, by week, by month and in total.
 
 ## Zwift workouts
 

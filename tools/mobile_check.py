@@ -32,7 +32,7 @@ OVERFLOW_JS = """() => {
 
 
 def default_pages() -> list[str]:
-    pages = ["/", "/plan", "/analysis", "/profile", "/settings"]
+    pages = ["/", "/plan", "/coach", "/analysis", "/profile", "/settings"]
     db = Path(os.environ.get("TC_DATA_DIR", "/tmp/tc-demo")) / "training.db"
     if db.exists():
         row = sqlite3.connect(db).execute("SELECT id FROM activities ORDER BY start_date DESC LIMIT 1").fetchone()

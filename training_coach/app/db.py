@@ -60,6 +60,41 @@ CREATE TABLE IF NOT EXISTS analyses (
     markdown TEXT,
     coach TEXT
 );
+CREATE TABLE IF NOT EXISTS llm_calls (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    ts TEXT,                  -- local ISO
+    purpose TEXT,             -- plan | analysis | chat
+    model TEXT,
+    input_tokens INTEGER,
+    output_tokens INTEGER,
+    cache_read_tokens INTEGER
+);
+CREATE TABLE IF NOT EXISTS chat_messages (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    ts TEXT,
+    role TEXT,                -- user | assistant
+    coach TEXT,
+    content TEXT,
+    proposal TEXT,            -- JSON {plan_id, days: [...]} when the coach proposed plan changes
+    warnings TEXT,            -- JSON list, checks the proposal still fails
+    notes TEXT,               -- JSON list of note texts saved with this reply
+    applied_plan_id INTEGER
+);
+CREATE TABLE IF NOT EXISTS coach_notes (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    created TEXT,
+    kind TEXT,                -- absence | event | injury | other
+    start TEXT,               -- YYYY-MM-DD
+    end TEXT,                 -- YYYY-MM-DD, last day it matters
+    text TEXT
+);
+CREATE TABLE IF NOT EXISTS health_daily (
+    date TEXT,
+    metric TEXT,              -- rhr | hrv | sleep | weight | vo2max
+    value REAL,
+    unit TEXT,
+    PRIMARY KEY (date, metric)
+);
 """
 
 ACTIVITY_COLUMNS = [
@@ -202,6 +237,84 @@ class DB:
         else:
             r = self.conn.execute("SELECT * FROM analyses WHERE id=?", (analysis_id,)).fetchone()
         return dict(r) if r else None
+
+    # --- Claude usage -----------------------------------------------------
+    def log_llm(self, ts: str, purpose: str, msg) -> None:
+        u = msg.usage
+        self.conn.execute(
+            "INSERT INTO llm_calls(ts, purpose, model, input_tokens, output_tokens, cache_read_tokens) VALUES(?,?,?,?,?,?)",
+            (ts, purpose, msg.model, u.input_tokens, u.output_tokens, getattr(u, "cache_read_input_tokens", 0) or 0))
+        self.conn.commit()
+
+    def llm_usage(self, since: str | None = None) -> dict[str, dict]:
+        """{purpose: {calls, input_tokens, output_tokens}} for calls at or after `since`."""
+        rows = self.conn.execute(
+            "SELECT purpose, COUNT(*) AS calls, SUM(input_tokens + cache_read_tokens) AS input_tokens, "
+            "SUM(output_tokens) AS output_tokens FROM llm_calls WHERE ts >= ? GROUP BY purpose ORDER BY purpose",
+            (since or "",)).fetchall()
+        return {r["purpose"]: dict(r) for r in rows}
+
+    # --- chat and coach notes ----------------------------------------------
+    def add_chat(self, ts: str, role: str, coach: str, content: str, proposal: dict | None = None,
+                 warnings: list[str] = (), notes: list[str] = ()) -> int:
+        cur = self.conn.execute(
+            "INSERT INTO chat_messages(ts, role, coach, content, proposal, warnings, notes) VALUES(?,?,?,?,?,?,?)",
+            (ts, role, coach, content, json.dumps(proposal) if proposal else None, json.dumps(list(warnings)),
+             json.dumps(list(notes))))
+        self.conn.commit()
+        return cur.lastrowid
+
+    def chat(self, limit: int = 50) -> list[dict]:
+        """The last `limit` messages, oldest first."""
+        rows = self.conn.execute("SELECT * FROM chat_messages ORDER BY id DESC LIMIT ?", (limit,)).fetchall()
+        return [_chat(r) for r in reversed(rows)]
+
+    def chat_message(self, msg_id: int) -> dict | None:
+        r = self.conn.execute("SELECT * FROM chat_messages WHERE id=?", (msg_id,)).fetchone()
+        return _chat(r) if r else None
+
+    def mark_applied(self, msg_id: int, plan_id: int) -> None:
+        self.conn.execute("UPDATE chat_messages SET applied_plan_id=? WHERE id=?", (plan_id, msg_id))
+        self.conn.commit()
+
+    def clear_chat(self) -> None:
+        self.conn.execute("DELETE FROM chat_messages")
+        self.conn.commit()
+
+    def add_note(self, created: str, kind: str, start: str, end: str, text: str) -> int:
+        cur = self.conn.execute("INSERT INTO coach_notes(created, kind, start, end, text) VALUES(?,?,?,?,?)",
+                                (created, kind, start, end, text))
+        self.conn.commit()
+        return cur.lastrowid
+
+    def delete_note(self, note_id: int) -> None:
+        self.conn.execute("DELETE FROM coach_notes WHERE id=?", (note_id,))
+        self.conn.commit()
+
+    def active_notes(self, today: str) -> list[dict]:
+        """Notes that still matter: their end date is today or later."""
+        rows = self.conn.execute("SELECT * FROM coach_notes WHERE end >= ? ORDER BY start, id", (today,)).fetchall()
+        return [dict(r) for r in rows]
+
+    # --- health -------------------------------------------------------------
+    def set_health(self, day: str, metric: str, value: float, unit: str, keep_first: bool = False) -> None:
+        self.conn.execute(
+            "INSERT INTO health_daily(date, metric, value, unit) VALUES(?,?,?,?) ON CONFLICT(date, metric) DO "
+            + ("NOTHING" if keep_first else "UPDATE SET value=excluded.value, unit=excluded.unit"),
+            (day, metric, value, unit))
+        self.conn.commit()
+
+    def health(self, since: str) -> list[dict]:
+        rows = self.conn.execute("SELECT * FROM health_daily WHERE date >= ? ORDER BY date", (since,)).fetchall()
+        return [dict(r) for r in rows]
+
+
+def _chat(r: sqlite3.Row) -> dict:
+    d = dict(r)
+    d["proposal"] = json.loads(d["proposal"]) if d["proposal"] else None
+    d["warnings"] = json.loads(d["warnings"] or "[]")
+    d["notes"] = json.loads(d["notes"] or "[]")
+    return d
 
 
 def _row(r: sqlite3.Row) -> dict:

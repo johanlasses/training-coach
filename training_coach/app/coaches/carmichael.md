@@ -44,6 +44,16 @@ it with intensity. Every minute on the bike has a purpose.
   approach does not need volume.
 - Always link the plan to the athlete's goal or event. With no event, set a peak 6–10 weeks out.
 
+## FTP testing
+- Your test is the **CTS Field Test** (test_protocol `cts_8min`): two 8-minute all-out time trials
+  with 10 minutes of easy spinning between them. FTP is about 90% of the higher 8-minute average power.
+- Steps: 15–20 min warmup with 2–3 short openers, an 8 min freeride effort, 10 min easy (~50% FTP),
+  a second 8 min freeride effort, then a 10–15 min cooldown. About 60 min in total.
+- Pacing: start the first effort at a hard but sustainable level and build into the last 2 minutes.
+  Same plan for the second one. Indoors, ride with ERG off.
+- Test at the start of every second block (about every 8 weeks), always rested: the day before is
+  rest or easy.
+
 ## How you analyse
 - Look at the quality and quantity of the high-intensity work. Is the rider actually hitting the
   targets? Compare the 5–20 min best efforts with FTP.

@@ -1,6 +1,8 @@
 """Thin wrapper around the Anthropic SDK for the coach and analysis calls."""
 from __future__ import annotations
 
+from datetime import datetime
+
 import anthropic
 
 MODEL = "claude-opus-5-5"
@@ -11,8 +13,8 @@ class LLMError(Exception):
 
 
 async def run(api_key: str, system: str, messages: list[dict], *, schema: dict | None = None,
-              effort: str = "high", max_tokens: int = 32000):
-    """Streams one request and returns the final message.
+              effort: str = "high", max_tokens: int = 32000, db=None, purpose: str = ""):
+    """Streams one request and returns the final message. With a db, the call's token usage is logged.
 
     Server-side refusal fallback is on: if Opus declines, the API reroutes to its recommended
     fallback model inside the same call.
@@ -44,6 +46,8 @@ async def run(api_key: str, system: str, messages: list[dict], *, schema: dict |
     finally:
         await client.close()
 
+    if db is not None:
+        db.log_llm(datetime.now().isoformat(timespec="seconds"), purpose, msg)
     if msg.stop_reason == "refusal":
         raise LLMError("The model declined this request")
     if msg.stop_reason == "max_tokens":

@@ -1,0 +1,57 @@
+{% extends "base.html" %}
+{% from "_macros.html" import note_list with context %}
+{% set page = 'coach' %}
+{% block content %}
+<div class="layout layout-aside">
+  <section>
+    <div class="page-head">
+      <div>
+        <h2>Coach</h2>
+        <div class="muted">{{ coach.name }}{{ '' if has_plan else ' · no plan this week yet' }}</div>
+      </div>
+      {% if messages %}<form method="post" action="{{ base }}/coach/clear" onsubmit="return confirm('Delete the whole conversation? Coach notes are kept.')"><button class="secondary">Clear chat</button></form>{% endif %}
+    </div>
+    {% if not ai_ok %}<div class="notice error">Add your Claude API key in <a href="{{ base }}/settings">Settings</a> to chat with the coach.</div>{% endif %}
+
+    <div class="chat">
+      {% for m in messages %}
+      <div class="msg {{ m.role }}">
+        <div class="msg-text">{{ m.content }}</div>
+        {% for n in m.notes %}<p class="facts">✎ Saved note: {{ n }}</p>{% endfor %}
+        {% if m.proposal %}
+        <div class="proposal">
+          <b>Proposed changes</b>
+          <ul>{% for new, old in m.diff %}
+            <li><span class="facts">{{ new.date | day_label }}</span>
+              {% if old %}<s>{{ old.title }}{% if old.kind != 'rest' %} · {{ old.duration_min }} min{% endif %}</s> → {% endif %}
+              <b>{{ new.title }}</b>{% if new.kind != 'rest' %} · {{ new.duration_min }} min{% endif %}</li>
+          {% endfor %}</ul>
+          {% if m.warnings %}<p class="facts">Still breaks: {{ m.warnings | join('; ') }}</p>{% endif %}
+          {% if m.applied_plan_id %}<p class="facts">✓ Applied to the plan.</p>
+          {% elif m.live %}<form method="post" action="{{ base }}/coach/{{ m.id }}/apply"><button>Apply to plan</button></form>
+          {% else %}<p class="facts">Out of date: the plan or the days have moved on.</p>{% endif %}
+        </div>
+        {% endif %}
+        <div class="msg-meta">{{ m.ts[5:16] | replace('T', ' ') }}</div>
+      </div>
+      {% endfor %}
+      {% if jobs.chat and jobs.chat.running %}<div class="msg assistant"><div class="msg-text muted">{{ coach.short }} is typing…</div></div>{% endif %}
+    </div>
+
+    <form method="post" action="{{ base }}/coach" class="chat-form" id="end">
+      <textarea name="message" rows="3" required placeholder="E.g. I'm away Thursday to Saturday. Or: add a gravel race on 8 November, 80 km."></textarea>
+      <button {{ 'disabled' if not ai_ok or (jobs.chat and jobs.chat.running) }}>Send</button>
+    </form>
+  </section>
+  <aside>
+    <h2 class="section-title">Coach notes</h2>
+    <p class="caption muted">Every plan and analysis takes these into account until they end.</p>
+    {{ note_list(notes) }}
+  </aside>
+</div>
+{% if jobs.chat and jobs.chat.running %}
+<script>  // reload for the reply, but never over something being typed
+setInterval(() => { if (!document.querySelector('.chat-form textarea').value.trim()) location.reload(); }, 4000);
+</script>
+{% endif %}
+{% endblock %}

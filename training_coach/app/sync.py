@@ -16,6 +16,7 @@ RESYNC_DAYS = 14          # re-list recent window to catch edits/deletions
 STREAMS_PER_RUN = 40
 DEFAULT_FTP = 200
 EFTP_WINDOW_DAYS = 90
+TEST_VALID_DAYS = 84  # a field test sets FTP for 12 weeks, then eFTP takes over again
 
 
 async def sync(db: DB, strava: StravaClient, cfg: Config) -> dict:
@@ -77,10 +78,15 @@ def process_streams(s: dict[str, list]) -> dict:
     return out
 
 
-def ftp_at(acts_by_date: list[dict], day: date, override: int) -> tuple[float, str]:
-    """FTP in effect on `day`: override, else eFTP from best efforts in the prior 90 days."""
+def ftp_at(acts_by_date: list[dict], day: date, override: int, tests: list[dict] = ()) -> tuple[float, str]:
+    """FTP in effect on `day`: override, else the latest field test in the 12 weeks up to `day`, else eFTP from
+    best efforts in the prior 90 days. A test only counts from its own date, so it never rewrites older rides."""
     if override:
         return float(override), "override"
+    lo_test = (day - timedelta(days=TEST_VALID_DAYS)).isoformat()
+    valid = [t for t in tests if lo_test <= t["date"] <= day.isoformat()]
+    if valid:
+        return float(max(valid, key=lambda t: t["date"])["ftp"]), "test"
     lo = (day - timedelta(days=EFTP_WINDOW_DAYS)).isoformat()
     hi = (day + timedelta(days=1)).isoformat()
     curves = [a["mmp"] for a in acts_by_date if a.get("mmp") and lo <= a["start_date_local"] < hi]
@@ -93,7 +99,7 @@ def recompute(db: DB, cfg: Config) -> None:
     acts = db.activities()
     for a in acts:
         day = date.fromisoformat(a["start_date_local"][:10])
-        ftp, _ = ftp_at(acts, day, cfg.ftp_override)
+        ftp, _ = ftp_at(acts, day, cfg.ftp_override, cfg.ftp_tests)
         secs = a["moving_time"] or 0
         np = a.get("np") or (a.get("weighted_avg_watts") if a.get("device_watts") else None)
         if np:
