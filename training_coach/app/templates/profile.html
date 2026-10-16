@@ -72,8 +72,10 @@
   {% if health_options is none %}<p class="caption"><b>Couldn't read the sensor list from Home Assistant.</b> You can still type entity ids.</p>{% endif %}
   <datalist id="health-sensors">{% for o in health_options or [] %}<option value="{{ o.entity_id }}">{{ o.label }}</option>{% endfor %}</datalist>
   {% for m, (label, unit) in health_metrics.items() %}
+  {% set found = health_found.get(m) %}
   <label>{{ label }}
-    <input name="health_{{ m }}_entity" value="{{ cfg['health_' ~ m ~ '_entity'] }}" list="health-sensors" placeholder="sensor.…" autocomplete="off">
+    <input name="health_{{ m }}_entity" value="{{ cfg['health_' ~ m ~ '_entity'] or found or '' }}" list="health-sensors" placeholder="sensor.…" autocomplete="off">
+    {% if found %}<small>Found in Home Assistant. Save the profile to use it.</small>{% endif %}
     {% if health_latest[m] %}<small>Latest {{ '%g' | format(health_latest[m].latest) }} {{ unit }} on {{ health_latest[m].latest_date | day_label }} ·
       7-day mean {{ health_latest[m].mean_7d }}{% if health_latest[m].baseline_mean %}, baseline {{ health_latest[m].baseline_mean }}{% endif %}</small>{% endif %}</label>
   {% endfor %}

@@ -64,7 +64,15 @@ It eases off when HRV drops or resting HR rises over several days, not on a sing
 
 1. In the Home Assistant iPhone app (2026.8 or later): **Settings → Companion App → Sensors → Apple Health**.
    Enable the sensors you want and allow access in the iOS prompt. The feature is marked *Labs*.
-2. In the add-on, on **Profile → Apple Health**, pick the sensors from the list.
+   The ones the coach uses are Resting Heart Rate, Heart Rate Variability and Sleep Duration, plus Weight and VO2 Max.
+   If you dismissed the prompt, allow access under iOS **Settings → Health → Data Access & Devices → Home Assistant**.
+2. Open the Home Assistant app once, so the phone sends its first values. They appear in Home Assistant as
+   `sensor.<phone>_resting_heart_rate`, `sensor.<phone>_heart_rate_variability`, `sensor.<phone>_sleep_duration`,
+   `sensor.<phone>_weight` and `sensor.<phone>_vo2_max`.
+3. In the add-on, open **Profile → Apple Health**. The first time, the sensors it found are filled in for you
+   ("Found in Home Assistant"). Check them and press **Save profile**. You can also pick or type any other sensor.
+
+The coach needs about a week of values before it sees a trend, and five weeks for the full baseline.
 
 The add-on reads them from Home Assistant every hour and keeps one value per day. The iPhone app stamps a value
 with the time it was sent, not the time it was measured, so a value counts for the day it was read.

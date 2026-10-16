@@ -85,6 +85,30 @@ def test_candidates_pick_health_sensors():
     assert out[1]["label"] == "Phone HRV: 48 ms"
 
 
+# Names and units as the HA iOS app 2026.9 reports them (no "health" in them)
+IOS = [st("sensor.johan_iphone_resting_heart_rate", "52", "bpm", "Johan iPhone  Resting Heart Rate"),
+       st("sensor.johan_iphone_heart_rate_variability", "103", "ms", "Johan iPhone  Heart Rate Variability"),
+       st("sensor.johan_iphone_sleep_duration", "497", "min", "Johan iPhone  Sleep Duration"),
+       st("sensor.johan_iphone_weight", "75.8", "kg", "Johan iPhone  Weight"),
+       st("sensor.johan_iphone_vo2_max", "unavailable", "mL/kg·min", "Johan iPhone  VO2 Max"),
+       st("sensor.johan_iphone_heart_rate", "72", "bpm"), st("sensor.johan_iphone_lean_body_mass", "68.9", "kg"),
+       st("sensor.johan_iphone_deep_sleep", "84", "min"), st("sensor.johan_iphone_battery_level", "90", "%")]
+
+
+def test_detects_ios_app_sensors():
+    found = health.detect(health.candidates(IOS))
+    assert found == {"rhr": "sensor.johan_iphone_resting_heart_rate", "hrv": "sensor.johan_iphone_heart_rate_variability",
+                     "sleep": "sensor.johan_iphone_sleep_duration", "weight": "sensor.johan_iphone_weight"}
+    # VO2 max has no value yet: listed to pick, not pre-filled
+    assert "sensor.johan_iphone_vo2_max" in [c["entity_id"] for c in health.candidates(IOS)]
+    # A printer's filament weight (wrong unit) or a scale with one metric never beats the phone
+    others = IOS + [st("sensor.a_old_ipad_resting_heart_rate", "unavailable", "bpm"),
+                    st("sensor.a_printer_filament_weight", "830", "g"), st("sensor.a_scale_weight", "76", "kg")]
+    found = health.detect(health.candidates(others))
+    assert found["rhr"] == "sensor.johan_iphone_resting_heart_rate" and found["weight"] == "sensor.johan_iphone_weight"
+    assert health.normalise("sleep", 497, "min") == pytest.approx(8.28, abs=0.01)
+
+
 @pytest.fixture
 def client(tmp_path, monkeypatch):
     monkeypatch.setattr(main, "DATA_DIR", tmp_path)
@@ -112,3 +136,16 @@ def test_profile_health_card_and_snapshot(client, monkeypatch):
     s.db.set_health((date.today() - timedelta(days=10)).isoformat(), "rhr", 50, "bpm")
     assert s.snapshot()["health"]["rhr"]["latest"] == 52
     assert "Latest 52.0 bpm" in client.get("/profile").text or "Latest 52 bpm" in client.get("/profile").text
+
+
+def test_profile_prefills_detected_sensors_on_first_setup_only(client, monkeypatch):
+    async def fake_states():
+        return IOS
+
+    monkeypatch.setattr(ha, "states", fake_states)
+    html = client.get("/profile").text
+    assert 'name="health_hrv_entity" value="sensor.johan_iphone_heart_rate_variability"' in html
+    assert html.count("Found in Home Assistant") == 4
+    client.post("/profile", data={"health_rhr_entity": "sensor.johan_iphone_resting_heart_rate", "health_hrv_entity": ""})
+    html = client.get("/profile").text  # configured now: a cleared field stays cleared
+    assert 'name="health_hrv_entity" value=""' in html and "Found in Home Assistant" not in html

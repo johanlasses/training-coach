@@ -116,6 +116,10 @@ class State:
     async def do_chat(self) -> None:
         await chat.respond(self.db, self.cfg, self.snapshot(), date.today())
 
+    async def do_plan(self, week_start: date, coach_key: str) -> None:
+        await coach_mod.generate_plan(self.db, self.cfg, self.snapshot(), week_start, date.today(), coach_key)
+        await self.publish()
+
     async def do_analysis(self, coach_key: str) -> None:
         await analysis.run_analysis(self.db, self.cfg, self.snapshot(), "manual", coach_key)
 
@@ -601,9 +605,12 @@ async def profile_view(request: Request):
     today = date.today()
     acts = st.db.activities(since_local=(today - timedelta(days=400)).isoformat())
     wkg = stats.dashboard(acts, today, st.cfg)["wkg"] if acts else None
+    options = await st.health_options()
     return render(request, "profile.html", cfg=st.cfg, weekdays=WEEKDAYS, levels=LEVELS, wkg=wkg,
                   notes=st.db.active_notes(today.isoformat()), health_metrics=health.METRICS,
-                  health_latest=health.summary(st.db, today), health_options=await st.health_options(),
+                  health_latest=health.summary(st.db, today), health_options=options,
+                  # Pre-fill only on first setup, so a field cleared on purpose stays cleared
+                  health_found={} if health.entities(st.cfg) else health.detect(options or []),
                   suggested=level_for_wkg(wkg) if wkg else None)
 
 

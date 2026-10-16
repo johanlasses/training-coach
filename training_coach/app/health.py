@@ -23,6 +23,9 @@ METRICS = {
     "weight": ("Weight", "kg"),
     "vo2max": ("VO2 max", "ml/kg/min"),
 }
+# How the HA iOS app names each metric: sensor.<device>_<key>, e.g. sensor.johan_iphone_resting_heart_rate
+SENSOR_KEYS = {"rhr": "resting_heart_rate", "hrv": "heart_rate_variability", "sleep": "sleep_duration",
+               "weight": "weight", "vo2max": "vo2_max"}
 TO_HOURS = {"h": 1, "hr": 1, "hours": 1, "min": 1 / 60, "minutes": 1 / 60, "s": 1 / 3600}
 TO_KG = {"kg": 1, "lb": 0.45359237, "lbs": 0.45359237}
 
@@ -68,14 +71,34 @@ def changed_on(s: dict) -> date | None:
     return None
 
 
+def metric_of(entity_id: str) -> str | None:
+    return next((m for m, key in SENSOR_KEYS.items() if entity_id.endswith("_" + key)), None)
+
+
 def candidates(states: list[dict]) -> list[dict]:
-    """Sensors that look like Apple Health data, for the entity pickers on Profile."""
+    """Sensors that look like Apple Health data, for the entity pickers on Profile: the iOS app's own names, or
+    "health" in the id or name (Health Auto Export and the like)."""
     out = []
     for s in states:
         eid, name = s.get("entity_id", ""), s.get("attributes", {}).get("friendly_name", "")
-        if eid.startswith("sensor.") and ("health" in eid or "health" in name.lower()):
-            out.append({"entity_id": eid, "label": f"{name or eid}: {s.get('state')} {s.get('attributes', {}).get('unit_of_measurement', '')}".strip()})
+        if eid.startswith("sensor.") and (metric_of(eid) or "health" in eid or "health" in name.lower()):
+            unit = s.get("attributes", {}).get("unit_of_measurement", "")
+            out.append({"entity_id": eid, "metric": metric_of(eid), "unit": unit,
+                        "available": s.get("state") not in ("unknown", "unavailable"),
+                        "label": f"{name or eid}: {s.get('state')} {unit}".strip()})
     return sorted(out, key=lambda c: c["entity_id"])
+
+
+def detect(options: list[dict]) -> dict[str, str]:
+    """Metric → sensor to pre-fill: reporting now, in a unit we can store, and from the device that reports the most
+    metrics (the phone), so a printer's filament weight never wins."""
+    usable = [o for o in options if o["metric"] and o["available"] and normalise(o["metric"], 1, o["unit"]) is not None]
+    prefix = {o["entity_id"]: o["entity_id"].removesuffix("_" + SENSOR_KEYS[o["metric"]]) for o in usable}
+    per_device = {p: list(prefix.values()).count(p) for p in prefix.values()}
+    out: dict[str, str] = {}
+    for o in sorted(usable, key=lambda o: (-per_device[prefix[o["entity_id"]]], o["entity_id"])):
+        out.setdefault(o["metric"], o["entity_id"])
+    return out
 
 
 def summary(db: DB, today: date) -> dict:

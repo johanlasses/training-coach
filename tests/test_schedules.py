@@ -175,3 +175,25 @@ def test_unscored_ride_pages_render(client):
     assert st.db.activity(7)["ftp_used"] is None
     assert client.get("/").status_code == 200
     assert client.get("/activity/7").status_code == 200
+
+
+def test_plan_button_and_auto_plan_reach_generate_plan(client, monkeypatch):
+    # 0.4.0 dropped State.do_plan, so "Generate plan" 500'd and the auto plan failed. Run the jobs for real.
+    st, calls = main.app.state.st, []
+
+    async def fake_generate(db, cfg, snap, week_start, today, coach_key=None):
+        calls.append((week_start, coach_key))
+
+    async def noop(*a, **k):
+        return None
+
+    monkeypatch.setattr(main.coach_mod, "generate_plan", fake_generate)
+    monkeypatch.setattr(st, "publish", noop)
+    monkeypatch.setattr(main.ha, "notify", noop)
+    jobs = []
+    monkeypatch.setattr(st, "start_job", lambda name, coro: jobs.append(coro) or True)
+    r = client.post("/plan?week=2026-10-19", data={"coach": "carmichael"}, follow_redirects=False)
+    assert r.status_code == 303
+    asyncio.run(jobs[0])
+    asyncio.run(st.do_auto_plan(main.date(2026, 10, 26)))
+    assert calls == [(main.date(2026, 10, 19), "carmichael"), (main.date(2026, 10, 26), st.cfg.default_coach)]

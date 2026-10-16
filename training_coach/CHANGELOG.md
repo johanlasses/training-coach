@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.4.2 (2026-10-16)
+
+- **Generate plan** works again. Since 0.4.0 it showed "Internal Server Error", and the optional automatic weekly
+  plan failed the same way.
+- The Apple Health sensors from the Home Assistant iPhone app are now found automatically. The first time you open
+  **Profile → Apple Health**, resting HR, HRV, sleep and weight are filled in for you. Check them and press
+  **Save profile**. Before, the list only showed sensors with "health" in their name, so the iPhone app's sensors
+  were missing.
+- Sensors in the wrong unit (a 3D printer's filament weight, for example) are never suggested. Neither are sensors
+  that have no value yet.
+
 ## 0.4.1 (2026-10-16)
 
 Fixes the "Internal Server Error" after updating to 0.4.0.
