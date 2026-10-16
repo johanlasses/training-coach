@@ -39,6 +39,7 @@ class State:
         self.jobs: dict[str, dict] = {}
         self.flash: tuple[str, str] | None = None   # (kind, message) shown once on the next page
         self._tasks: set[asyncio.Task] = set()
+        self.sync_tried: datetime | None = None  # last scheduled attempt, so a failing sync doesn't retry every minute
         self.reload()
 
     def reload(self) -> None:
@@ -164,10 +165,12 @@ class State:
             try:
                 now = datetime.now()
                 cfg = self.cfg
-                last = self.db.get("last_sync")
+                last, utc = self.db.get("last_sync"), datetime.now(timezone.utc)
+                every = timedelta(minutes=cfg.sync_interval_min)
                 if self.strava.configured and cfg.sync_interval_min and (
-                        not last or datetime.now(timezone.utc) - datetime.fromisoformat(last["at"])
-                        > timedelta(minutes=cfg.sync_interval_min)):
+                        not last or utc - datetime.fromisoformat(last["at"]) > every) and (
+                        not self.sync_tried or utc - self.sync_tried > every):
+                    self.sync_tried = utc
                     self.start_job("sync", self.do_sync())
                 if cfg.zwift_refresh and self.zwift.configured and self.db.get("zwift_refreshed") != now.date().isoformat():
                     # Keycloak drops idle sessions; a daily refresh keeps the Zwift login alive.

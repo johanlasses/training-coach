@@ -97,6 +97,8 @@ def power_histogram(watts: list[float]) -> dict[int, int]:
 def zone_seconds(hist: dict[int, int], ftp: float) -> list[int]:
     """Seconds per Coggan zone, from a 25 W histogram (bin midpoint decides the zone)."""
     out = [0] * len(ZONES)
+    if not ftp:  # not yet scored by recompute()
+        return out
     for b, secs in hist.items():
         frac = (b + HIST_BIN_W / 2) / ftp
         for i, (_, upper) in enumerate(ZONES):

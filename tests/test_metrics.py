@@ -97,3 +97,7 @@ def test_decoupling_detects_drift():
     hr = [130.0] * 1800 + [143.0] * 1800
     assert metrics.decoupling(watts, hr) == pytest.approx(9.1, abs=0.1)
     assert metrics.decoupling(watts[:600], hr[:600]) is None
+
+
+def test_zone_seconds_without_ftp_is_empty():
+    assert metrics.zone_seconds({200: 60}, None) == [0] * len(metrics.ZONES)

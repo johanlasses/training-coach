@@ -10,7 +10,7 @@ import httpx
 log = logging.getLogger(__name__)
 
 SUPERVISOR_TOKEN = os.environ.get("SUPERVISOR_TOKEN")
-# Local dev: HA_URL=http://192.168.68.155:8123 HA_TOKEN=<long-lived token>
+# Local dev: HA_URL=http://192.168.68.156:8123 HA_TOKEN=<long-lived token>
 HA_URL = "http://supervisor/core" if SUPERVISOR_TOKEN else os.environ.get("HA_URL", "")
 HA_TOKEN = SUPERVISOR_TOKEN or os.environ.get("HA_TOKEN", "")
 

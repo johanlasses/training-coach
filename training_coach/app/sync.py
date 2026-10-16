@@ -4,6 +4,8 @@ from __future__ import annotations
 import logging
 from datetime import date, datetime, timedelta, timezone
 
+import httpx
+
 from . import metrics
 from .config import Config
 from .db import DB
@@ -48,11 +50,21 @@ async def sync(db: DB, strava: StravaClient, cfg: Config) -> dict:
     fetched = 0
     try:
         for a in db.activities_missing_streams(STREAMS_PER_RUN):
-            s = await strava.streams(a["id"])
+            try:
+                s = await strava.streams(a["id"])
+            except httpx.HTTPStatusError as e:
+                if e.response.status_code != 404:
+                    raise
+                # Manual or private activities have no streams. Mark them done, or every sync dies on them.
+                log.warning("No streams for activity %s (404), skipping", a["id"])
+                s = {}
             db.update_activity(a["id"], streams_fetched=1, **process_streams(s))
             fetched += 1
     except RateLimited as e:
         log.info("Stopping stream fetch: %s", e)
+    except Exception:
+        recompute(db, cfg)  # score what was stored, so a failing ride can't leave others without FTP
+        raise
 
     recompute(db, cfg)
     result = {"at": now.isoformat(timespec="seconds"), "listed": len(rides), "new": new,

@@ -14,7 +14,7 @@
   {% if a.np %}<div class="tile"><div class="label">Normalized power</div><div class="value">{{ a.np | round | int }} <small>W</small></div>
     <div class="sub">avg {{ (a.avg_watts or 0) | round | int }} W · max {{ (a.max_watts or 0) | round | int }} W</div></div>{% endif %}
   <div class="tile"><div class="label">TSS</div><div class="value">{{ (a.tss or 0) | round | int }}</div>
-    <div class="sub">{% if a.intensity %}IF {{ '%.2f' % a.intensity }} · {% endif %}from {{ a.tss_source }} · FTP {{ a.ftp_used | round | int }} W</div></div>
+    <div class="sub">{% if a.intensity %}IF {{ '%.2f' % a.intensity }} · {% endif %}from {{ a.tss_source }}{% if a.ftp_used %} · FTP {{ a.ftp_used | round | int }} W{% endif %}</div></div>
   {% if a.avg_hr %}<div class="tile"><div class="label">Heart rate</div><div class="value">{{ a.avg_hr | round | int }} <small>bpm</small></div>
     <div class="sub">max {{ (a.max_hr or 0) | round | int }}</div></div>{% endif %}
   {% if a.decoupling is not none %}<div class="tile"><div class="label">Pw:HR decoupling</div><div class="value">{{ a.decoupling }}<small>%</small></div>
@@ -39,7 +39,7 @@
 {% if zones %}
 <div class="card">
   <h2>Time in zones</h2>
-  <p class="caption">Based on FTP {{ a.ftp_used | round | int }} W.</p>
+  {% if a.ftp_used %}<p class="caption">Based on FTP {{ a.ftp_used | round | int }} W.</p>{% endif %}
   {% set zmax = (zones | map(attribute=1) | max) or 1 %}
   <table class="zones">
   {% for name, secs in zones %}

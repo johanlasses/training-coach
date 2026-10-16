@@ -81,6 +81,40 @@ async def test_exchange_code_rejects_missing_scope_and_errors(db):
 
 
 @respx.mock
+async def test_stream_404_is_skipped_and_rides_still_scored(db):
+    # Seen live in 0.4.0: a manual activity's streams 404'd, aborting every sync before recompute(), which left
+    # streamed rides with ftp_used NULL and made the dashboard 500.
+    respx.post(TOKEN_URL).mock(return_value=httpx.Response(200, json={
+        "access_token": "a", "refresh_token": "b", "expires_at": int(time.time()) + 3600}))
+    respx.get(f"{API}/athlete/activities").mock(return_value=httpx.Response(200, json=[
+        strava_activity(1, start="2026-10-01T10:00:00Z"), strava_activity(2, start="2026-10-02T10:00:00Z")]))
+    respx.get(f"{API}/activities/2/streams").mock(return_value=httpx.Response(404, json={"message": "Record Not Found"}))
+    respx.get(f"{API}/activities/1/streams").mock(return_value=httpx.Response(200, json={
+        "time": {"data": list(range(3600))}, "watts": {"data": [250] * 3600}}))
+    db.set("strava_token", {"refresh_token": "r1"})
+    result = await sync(db, StravaClient(db, "id", "s"), Config())
+    assert result["streams"] == 2 and result["pending_streams"] == 0
+    assert db.activity(1)["power_hist"] and db.activity(1)["ftp_used"] == 250
+    assert db.activity(2)["streams_fetched"] == 1 and db.activity(2)["ftp_used"]
+
+
+@respx.mock
+async def test_stream_server_error_still_scores_stored_rides(db):
+    respx.post(TOKEN_URL).mock(return_value=httpx.Response(200, json={
+        "access_token": "a", "refresh_token": "b", "expires_at": int(time.time()) + 3600}))
+    respx.get(f"{API}/athlete/activities").mock(return_value=httpx.Response(200, json=[
+        strava_activity(1, start="2026-10-01T10:00:00Z"), strava_activity(2, start="2026-10-02T10:00:00Z")]))
+    respx.get(f"{API}/activities/2/streams").mock(return_value=httpx.Response(200, json={
+        "time": {"data": list(range(3600))}, "watts": {"data": [250] * 3600}}))
+    respx.get(f"{API}/activities/1/streams").mock(return_value=httpx.Response(502))
+    db.set("strava_token", {"refresh_token": "r1"})
+    with pytest.raises(httpx.HTTPStatusError):
+        await sync(db, StravaClient(db, "id", "s"), Config())
+    assert db.activity(2)["ftp_used"] == 250
+    assert db.activity(1)["streams_fetched"] == 0  # transient: retried next sync
+
+
+@respx.mock
 async def test_rate_limit_stops_stream_fetch(db):
     respx.post(TOKEN_URL).mock(return_value=httpx.Response(200, json={
         "access_token": "a", "refresh_token": "b", "expires_at": int(time.time()) + 3600}))

@@ -7,13 +7,13 @@ description: Fetch the Training Coach add-on log from Home Assistant and pull ou
 
 Get the real traceback before touching code. Local reproductions don't count until the log agrees.
 
-1. **Reach HA.** Needs `HA_TOKEN` (long-lived, admin user) in the shell; `HA_URL` defaults to `http://192.168.68.155:8123`.
+1. **Reach HA.** Needs `HA_TOKEN` (long-lived, admin user) in the shell; `HA_URL` defaults to `http://192.168.68.156:8123`.
    If the host is unreachable (EHOSTDOWN, timeout), the laptop isn't on the home network or Tailscale is down. Say so and stop;
    don't work around it. Don't test live logins from the ABB laptop either (Zscaler breaks TLS).
 2. **Fetch** through HA Core's Supervisor proxy. The slug is `<repo hash>_training_coach`; the hash for
    `https://github.com/johanlasses/training-coach` is `43394493`:
    ```bash
-   HA=${HA_URL:-http://192.168.68.155:8123}
+   HA=${HA_URL:-http://192.168.68.156:8123}
    curl -sf -H "Authorization: Bearer $HA_TOKEN" -H "Accept: text/plain" \
      "$HA/api/hassio/addons/43394493_training_coach/logs" > /tmp/tc-addon.log; echo "exit $?"
    ```

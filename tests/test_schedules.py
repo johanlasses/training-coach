@@ -82,6 +82,18 @@ def test_sync_interval_and_off(client, monkeypatch):
     assert "sync" not in tick(st, monkeypatch, now)
 
 
+def test_failing_sync_waits_an_interval_before_retrying(client, monkeypatch):
+    # A failed sync never updates last_sync; without its own throttle it retried every minute.
+    st = main.app.state.st
+    monkeypatch.setattr(type(st.strava), "configured", property(lambda self: True))
+    st.db.set("last_sync", None)
+    st.cfg.sync_interval_min = 30
+    now = main.datetime(2026, 10, 18, 12, 0)
+    assert "sync" in tick(st, monkeypatch, now)
+    assert "sync" not in tick(st, monkeypatch, now + main.timedelta(minutes=1))
+    assert "sync" in tick(st, monkeypatch, now + main.timedelta(minutes=31))
+
+
 def test_schedule_form_saves_and_unticks(client):
     client.post("/settings", data={"_section": "schedules", "auto_plan": "on", "auto_plan_day": "sat",
                                    "auto_plan_time": "18:30", "sync_interval_min": "60", "notify_time": ""})
@@ -151,3 +163,15 @@ def test_busy_job_leaves_the_auto_plan_slot_open(client, monkeypatch):
     with pytest.raises(SystemExit):
         asyncio.run(st.scheduler())
     assert attempts == ["plan"] and st.db.get("auto_plan_ran") is None  # tried again on the next tick
+
+
+def test_unscored_ride_pages_render(client):
+    # A ride with power data but no FTP yet (sync died before recompute) used to 500 home and the ride page.
+    from app.strava import summary_from_strava
+    from tests.test_sync import strava_activity
+    st = main.app.state.st
+    st.db.upsert_activity_summary(summary_from_strava(strava_activity(7, start=main.date.today().isoformat() + "T08:00:00Z")))
+    st.db.update_activity(7, streams_fetched=1, power_hist={200: 3600}, np=200)
+    assert st.db.activity(7)["ftp_used"] is None
+    assert client.get("/").status_code == 200
+    assert client.get("/activity/7").status_code == 200

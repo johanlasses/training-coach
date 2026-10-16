@@ -45,6 +45,6 @@ CI (`.github/workflows/test.yml`) runs ruff and pytest on push.
 ## MCP servers (`.mcp.json`)
 
 - `home-assistant`: HA's own MCP server. Needs `HA_TOKEN` (a long-lived token) exported in the shell; `HA_URL` defaults
-  to `http://192.168.68.155:8123`. Use it to check `sensor.training_*` entities and notifications.
+  to `http://192.168.68.156:8123`. Use it to check `sensor.training_*` entities and notifications.
 - `playwright`: interactive browser via the installed Chrome. For layout checks, prefer `tools/mobile_check.py`.
 - `context7`: current library docs. Use it for FastAPI, anthropic 1.x and aiomqtt APIs instead of guessing from memory.
