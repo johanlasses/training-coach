@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.4.3 (2026-10-16)
+
+The add-on can now talk to Home Assistant. A startup bug had blocked that in every earlier version, so these
+features never worked:
+
+- **Apple Health:** Profile now lists your iPhone's health sensors and fills them in. Before, it said "Couldn't read
+  the sensor list from Home Assistant".
+- **Sensors:** `sensor.training_ftp`, `_wkg`, `_ctl`, `_atl`, `_tsb`, `_week_hours`, `_week_km` and
+  `_today_session` appear in Home Assistant after the first sync. This needs the MQTT integration.
+- **Notifications:** the morning session reminder and the notices about the automatic plan and analysis are sent
+  to the notify service set on Settings.
+- **Schedules now run on your local time.** Until now the add-on ran on UTC, so every time on
+  Settings → Schedules fired 2 hours late in summer and 1 hour late in winter. Check your times after updating. If
+  you set them early to make up for the delay, set them back.
+- Saving Profile, an FTP change or a plan no longer waits for the Home Assistant sensors to update.
+
 ## 0.4.2 (2026-10-16)
 
 - **Generate plan** works again. Since 0.4.0 it showed "Internal Server Error", and the optional automatic weekly

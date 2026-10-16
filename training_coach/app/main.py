@@ -231,6 +231,8 @@ def today_session(db: DB, today: date) -> dict | None:
 async def lifespan(app: FastAPI):
     st = State()
     app.state.st = st
+    log.info("Home Assistant API: %s", "via Supervisor" if ha.SUPERVISOR_TOKEN else ha.HA_URL or
+             "not available (no SUPERVISOR_TOKEN: notifications, sensors and Apple Health are off)")
     task = asyncio.create_task(st.scheduler())
     yield
     task.cancel()
@@ -400,7 +402,7 @@ async def plan_activate(request: Request, plan_id: int):
     if not plan:
         raise HTTPException(404)
     st.db.set_active_plan(plan["week_start"], plan_id)
-    await st.publish()
+    st.start_job("publish", st.publish())  # MQTT round-trip: don't hold the redirect
     return back(request, f"/plan?week={plan['week_start']}&coach={plan['coach'] or ''}")
 
 
@@ -441,7 +443,7 @@ async def coach_apply(request: Request, msg_id: int):
     plan_id, text = chat.apply(st.db, msg, date.today())
     st.flash = ("ok" if plan_id else "error", text)
     if plan_id:
-        await st.publish()
+        st.start_job("publish", st.publish())  # MQTT round-trip: don't hold the redirect
     return back(request, "/coach#end")
 
 
@@ -477,7 +479,7 @@ async def ftp_apply(request: Request):
         save_config(st.db, st.cfg)
         st.reload()
         recompute(st.db, st.cfg)
-        await st.publish()
+        st.start_job("publish", st.publish())  # MQTT round-trip: don't hold the redirect
         st.flash = ("ok", f"FTP {ftp} W from your test on {day.strftime('%-d %b')}. It counts from that day for 12 weeks, "
                           "then the estimate from your best efforts takes over." + (
                               " Your FTP override on Profile still wins until you clear it." if st.cfg.ftp_override else ""))
@@ -491,7 +493,7 @@ async def ftp_test_delete(request: Request, date_: str = Query(alias="date")):
     save_config(st.db, st.cfg)
     st.reload()
     recompute(st.db, st.cfg)
-    await st.publish()
+    st.start_job("publish", st.publish())  # MQTT round-trip: don't hold the redirect
     st.flash = ("ok", "Test result removed.")
     return back(request, "/profile")
 
@@ -619,7 +621,7 @@ async def profile_save(request: Request):
     st: State = request.app.state.st
     errors = apply_form(st, await request.form())
     recompute(st.db, st.cfg)  # FTP override and LTHR change every ride's TSS
-    await st.publish()
+    st.start_job("publish", st.publish())  # MQTT round-trip: don't hold the redirect
     st.flash = ("error", "Saved, except: " + "; ".join(errors)) if errors else ("ok", "Profile saved.")
     return back(request, "/profile")
 

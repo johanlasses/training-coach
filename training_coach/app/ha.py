@@ -106,7 +106,7 @@ async def publish_sensors(state: dict) -> None:
                 cfg = {
                     "name": name,
                     "unique_id": f"training_coach_{key}",
-                    "object_id": f"training_{key}",
+                    "default_entity_id": f"sensor.training_{key}",  # object_id is ignored since HA 2026.4
                     "state_topic": STATE_TOPIC,
                     "value_template": f"{{{{ value_json.{key} }}}}",
                     "icon": icon,

@@ -1,4 +1,5 @@
 from datetime import date, timedelta
+from pathlib import Path
 
 import httpx
 import pytest
@@ -149,3 +150,41 @@ def test_profile_prefills_detected_sensors_on_first_setup_only(client, monkeypat
     client.post("/profile", data={"health_rhr_entity": "sensor.johan_iphone_resting_heart_rate", "health_hrv_entity": ""})
     html = client.get("/profile").text  # configured now: a cleared field stays cleared
     assert 'name="health_hrv_entity" value=""' in html and "Found in Home Assistant" not in html
+
+
+def test_run_sh_keeps_the_supervisor_token():
+    # s6-overlay's /init in the HA base image clears the environment; without with-contenv the add-on never saw
+    # SUPERVISOR_TOKEN, so HA reads, notifications and MQTT sensors silently did nothing (0.1.0-0.4.2).
+    run_sh = (Path(__file__).parent.parent / "training_coach" / "run.sh").read_text()
+    assert run_sh.startswith("#!/usr/bin/with-contenv ")
+
+
+async def test_mqtt_discovery_names_sensors_training_star(monkeypatch):
+    # HA 2026.4 ignores object_id; default_entity_id is what makes the entities sensor.training_*.
+    import json
+
+    import aiomqtt
+    sent = {}
+
+    class FakeClient:
+        def __init__(self, **kw):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *a):
+            return False
+
+        async def publish(self, topic, payload, retain=False):
+            sent[topic] = json.loads(payload)
+
+    async def settings():
+        return {"host": "core-mosquitto", "port": 1883}
+
+    monkeypatch.setattr(ha, "mqtt_settings", settings)
+    monkeypatch.setattr(aiomqtt, "Client", FakeClient)
+    await ha.publish_sensors({"ftp": 250})
+    cfg = sent["homeassistant/sensor/training_coach/ftp/config"]
+    assert cfg["default_entity_id"] == "sensor.training_ftp" and "object_id" not in cfg
+    assert sent[ha.STATE_TOPIC] == {"ftp": 250}
