@@ -17,14 +17,6 @@
   {%- endif -%}
 {%- endmacro %}
 
-{% macro form_status(tsb) -%}
-  {%- if tsb < -30 -%}<span class="badge"><span class="dot" style="background:var(--critical)"></span>⚠ High fatigue</span>
-  {%- elif tsb < -10 -%}<span class="badge"><span class="dot" style="background:var(--good)"></span>✓ Productive training</span>
-  {%- elif tsb <= 5 -%}<span class="badge"><span class="dot" style="background:var(--text-muted)"></span>– Neutral</span>
-  {%- else -%}<span class="badge"><span class="dot" style="background:var(--div-pos)"></span>↑ Fresh</span>
-  {%- endif -%}
-{%- endmacro %}
-
 {% macro status_pill(s) -%}
   {%- set icons = {'done': '✓', 'partial': '◐', 'missed': '✕', 'extra': '+', 'rest': '·', 'upcoming': '○'} -%}
   {%- set labels = {'done': 'Done', 'partial': 'Partly done', 'missed': 'Missed', 'extra': 'Unplanned ride', 'rest': 'Rest', 'upcoming': 'Upcoming'} -%}
@@ -39,4 +31,45 @@
       <button class="secondary" aria-label="Delete note">✕</button></form>
   </div>
   {% else %}<p class="muted flush">None yet. Tell the coach about trips, races or injuries and it keeps them in mind.</p>{% endfor %}
+{% endmacro %}
+
+{% macro ride_visual(a, planned) -%}
+  {%- set prof = ride_profiles(a, planned) -%}
+  {%- if prof -%}
+  <div class="ride-visual">
+    {{ prof.ridden | safe }}
+    {%- if prof.planned %}
+    <div class="planned-label">Planned: {{ prof.planned_title }}</div>
+    <div class="planned">{{ prof.planned | safe }}</div>
+    {%- endif %}
+  </div>
+  {%- else -%}
+  {{ spark(a.spark_watts or a.spark_hr, 'Power over the ride' if a.spark_watts else 'Heart rate over the ride') }}
+  {%- endif -%}
+{%- endmacro %}
+
+{% macro ride_card(a, planned, latest=False, visual=True) %}
+<a class="feed-item{{ ' latest' if latest }}" href="{{ base }}/activity/{{ a.id }}">
+  {% if latest %}<div class="eyebrow">Latest ride</div>{% endif %}
+  <div class="feed-head">
+    <span class="feed-title">{{ a.name }}</span>
+    <span class="feed-meta">{{ ride_type(a) }}</span>
+  </div>
+  <div class="feed-meta">{{ a.start_date_local[:10] | day_label }} {{ a.start_date_local[11:16] }}{% if planned %} · planned: {{ planned.title }}{% endif %}</div>
+  <div class="feed-stats">
+    <div><b>{{ ((a.distance or 0) / 1000) | round(1) }} km</b>Distance</div>
+    <div><b>{{ a.moving_time | duration }}</b>Time</div>
+    {% if a.elevation_gain %}<div><b>{{ a.elevation_gain | round | int }} m</b>Elevation</div>{% endif %}
+    {% if a.np %}<div><b>{{ a.np | round | int }} W</b>NP</div>{% elif a.avg_watts %}<div><b>{{ a.avg_watts | round | int }} W</b>Avg power</div>{% endif %}
+    {% if a.tss %}<div><b>{{ a.tss | round | int }}</b>TSS{% if a.tss_source != 'power' %} ({{ a.tss_source }}){% endif %}</div>{% endif %}
+    {% if a.avg_hr %}<div><b>{{ a.avg_hr | round | int }}</b>Avg HR</div>{% endif %}
+  </div>
+  {% if visual %}{{ ride_visual(a, planned) }}{% else %}{{ spark(a.spark_watts or a.spark_hr, 'Power over the ride' if a.spark_watts else 'Heart rate over the ride') }}{% endif %}
+  {% if a.feedback %}
+  <div class="ride-feedback{{ ' compact' if not latest }}">
+    <b>{{ a.feedback.headline }}</b>
+    {% if latest %}<p>{{ a.feedback.notification }}</p><span class="more">Coach's full feedback →</span>{% endif %}
+  </div>
+  {% endif %}
+</a>
 {% endmacro %}

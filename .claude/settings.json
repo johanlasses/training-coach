@@ -35,7 +35,7 @@
             "type": "command",
             "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/run-tests.sh",
             "timeout": 120,
-            "statusMessage": "Running tests\u2026"
+            "statusMessage": "Running tests…"
           }
         ]
       }
@@ -59,7 +59,8 @@
       "Bash(.venv/bin/python tools/mobile_check.py)",
       "Bash(.venv/bin/ruff check training_coach tests tools)",
       "Bash(curl -s localhost:*)",
-      "Bash(.venv/bin/python tools/mobile_check.py *)"
+      "Bash(.venv/bin/python tools/mobile_check.py *)",
+      "Bash(.venv/bin/python -m pytest -q tests)"
     ]
   }
 }

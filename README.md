@@ -27,6 +27,11 @@ Setup steps are in [training_coach/DOCS.md](training_coach/DOCS.md).
 - **FTP tests** (`app/ftptest.py`): plan days carry `test_protocol`, and the estimate comes from the test ride's best efforts.
 - **Apple Health** (`app/health.py`): reads the HA iOS app's HealthKit sensors through the Supervisor API, stores daily
   values (`health_daily`), and adds 7- and 28-day trends to the snapshot.
+- **Ride feedback** (`app/feedback.py`): after each sync, rides from the last 48 h get a Haiku-written verdict
+  (planned vs actual per work segment, new bests, week so far, health) and a companion-app notification that opens
+  the ride. Each ride is handled once (`activities.notified`).
+- **Overview status** (`app/overview.py`): form, week vs plan, CTL/FTP trend and the next event, from plain numbers.
+- **Models** (`llm.MODELS`): Opus for plan and analysis, Sonnet for chat, Haiku for ride feedback.
 - **Scheduler** (`State.scheduler` in `app/main.py`): a one-minute tick with configurable slots. Every Claude call is logged
   in `llm_calls` for the usage table.
 - **UI**: FastAPI and Jinja behind HA ingress, Chart.js (vendored), with no build step.

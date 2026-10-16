@@ -126,7 +126,8 @@ def test_log_llm_sums_per_purpose(tmp_path):
     for purpose, ts in [("plan", "2026-10-01T10:00:00"), ("plan", "2026-10-15T10:00:00"), ("chat", "2026-10-15T11:00:00")]:
         db.log_llm(ts, purpose, SimpleNamespace(model="m", usage=SimpleNamespace(
             input_tokens=100, output_tokens=10, cache_read_input_tokens=50)))
-    assert db.llm_usage("2026-10-12")["plan"] == {"purpose": "plan", "calls": 1, "input_tokens": 150, "output_tokens": 10}
+    assert db.llm_usage("2026-10-12")["plan"] == {"calls": 1, "input_tokens": 150, "output_tokens": 10,
+                                                   "models": ["m"], "cost": 0.0}
     assert db.llm_usage()["plan"]["calls"] == 2 and db.llm_usage()["chat"]["calls"] == 1
 
 
@@ -197,3 +198,13 @@ def test_plan_button_and_auto_plan_reach_generate_plan(client, monkeypatch):
     asyncio.run(jobs[0])
     asyncio.run(st.do_auto_plan(main.date(2026, 10, 26)))
     assert calls == [(main.date(2026, 10, 19), "carmichael"), (main.date(2026, 10, 26), st.cfg.default_coach)]
+
+
+def test_usage_cost_uses_each_models_price(tmp_path):
+    from app import llm
+    db = DB(tmp_path / "t.db")
+    for purpose, model in [("plan", "claude-opus-5-5"), ("ride", "claude-haiku-5-5")]:
+        db.log_llm("2026-10-15T10:00:00", purpose, SimpleNamespace(model=model, usage=SimpleNamespace(
+            input_tokens=1_000_000, output_tokens=0, cache_read_input_tokens=0)))
+    usage = db.llm_usage(cost=llm.cost)
+    assert usage["plan"]["cost"] == 4.0 and usage["ride"]["cost"] == 0.10

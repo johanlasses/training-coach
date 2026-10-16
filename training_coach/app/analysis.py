@@ -48,4 +48,4 @@ async def run_analysis(db: DB, cfg: Config, snapshot: dict, kind: str, coach_key
     msg = await llm.run(cfg.anthropic_api_key, SYSTEM.format(philosophy=c.philosophy), [{"role": "user", "content":
                         f"```json\n{json.dumps(snapshot, indent=1)}\n```"}], effort="high",
                         db=db, purpose="analysis")
-    return db.save_analysis(datetime.now().isoformat(timespec="seconds"), kind, llm.MODEL, llm.text_of(msg), c.key)
+    return db.save_analysis(datetime.now().isoformat(timespec="seconds"), kind, llm.MODELS["analysis"], llm.text_of(msg), c.key)

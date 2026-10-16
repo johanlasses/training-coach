@@ -81,6 +81,15 @@ PLAN_SCHEMA = {
     "additionalProperties": False,
 }
 
+HEALTH_RULES = """- snapshot.health, when present, holds Apple Health trends: the last 7 days against a baseline of the 28 days \
+before them, with the days of data in each. Read them as a readiness signal, never from a single day, and only \
+when the 7 days hold at least 5 days of data and the baseline at least 14. Signals: HRV change_pct about -10% \
+or lower, resting HR change +4 bpm or more, 7-day sleep under ~6.5 h. Two signals together: swap the next hard \
+session for endurance or rest and say why. One signal: keep the session but shorten it or cap it at the low \
+end of its targets, and mention it. A sharp HRV rise during heavy load isn't freshness. Weight is only for \
+W/kg, and Apple's VO2 max comes from walking and running, so neither is a readiness signal. Missing data means \
+nothing."""
+
 SYSTEM = """You are a cycling coach for a single amateur road and gravel cyclist in Mälardalen, Sweden. \
 They train on Zwift indoors and ride road/gravel outside. Training is organised as rolling 4-week blocks \
 (3 build weeks + 1 recovery week).
@@ -106,14 +115,7 @@ rest or easy. For the main goal event, taper over 7-10 days: volume down ~40-60%
 same number of rides. Injury notes override the progression: back off until they end. Illness: no training \
 with fever or symptoms below the neck; after the note ends, at least 2-3 easy days before any hard session, \
 and after a fever roughly as many easy days as days sick. A note asking for a test counts as the athlete asking.
-- snapshot.health, when present, holds Apple Health trends: the last 7 days against a baseline of the 28 days \
-before them, with the days of data in each. Read them as a readiness signal, never from a single day, and only \
-when the 7 days hold at least 5 days of data and the baseline at least 14. Signals: HRV change_pct about -10% \
-or lower, resting HR change +4 bpm or more, 7-day sleep under ~6.5 h. Two signals together: swap the next hard \
-session for endurance or rest and say why. One signal: keep the session but shorten it or cap it at the low \
-end of its targets, and mention it. A sharp HRV rise during heavy load isn't freshness. Weight is only for \
-W/kg, and Apple's VO2 max comes from walking and running, so neither is a readiness signal. Missing data means \
-nothing.
+{health_rules}
 - Choose outdoor rides from the season and daylight: weekend outdoor rides when the season allows, weekday \
 outdoor rides only with daylight after work (sunset well after 18:00). Otherwise use Zwift. The athlete swaps \
 an outdoor ride for Zwift themselves if the weather turns, so give outdoor days a Zwift-friendly purpose.
@@ -147,7 +149,7 @@ def system_prompt(c: coaches.Coach, rules: dict) -> str:
     style = [f"- At most {rules['max_hard_sessions']} hard sessions in a build week, including rides already done."]
     style.append("- Never two hard days in a row." if rules["max_consecutive_hard"] == 1 else
                  f"- At most {rules['max_consecutive_hard']} hard days in a row, and the day after is rest or easy.")
-    return SYSTEM.format(style_rules="\n".join(style), philosophy=c.philosophy)
+    return SYSTEM.format(style_rules="\n".join(style), philosophy=c.philosophy, health_rules=HEALTH_RULES)
 
 
 def is_hard_day(d: dict) -> bool:
@@ -329,7 +331,7 @@ async def generate_plan(db: DB, cfg: Config, snapshot: dict, week_start: date, t
                                  snapshot.get("coach_notes", [])))
     plan["block_week"] = bw
     return db.save_plan(week_start.isoformat(), datetime.now().isoformat(timespec="seconds"),
-                        llm.MODEL, plan, warnings, c.key)
+                        llm.MODELS["plan"], plan, warnings, c.key)
 
 
 def compliance(plan_day: dict, acts_that_day: list[dict]) -> str:

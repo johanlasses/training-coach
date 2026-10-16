@@ -66,11 +66,12 @@ def estimated_tss(steps: list[dict]) -> float:
     return round(secs / 3600 * intensity**2 * 100, 1)
 
 
-def svg_profile(steps: list[dict], width: int = 600, height: int = 80) -> str:
-    """Zwift-style block chart, coloured by zone."""
+def svg_profile(steps: list[dict], width: int = 600, height: int = 80, total_s: int = 0, top: float = 0,
+                label: str = "Workout profile") -> str:
+    """Zwift-style block chart, coloured by zone. `total_s` and `top` put it on a shared scale with a ride."""
     segs = segments(steps)
-    total = sum(d for _, d, _, _ in segs) or 1
-    top = max([1.3] + [max(a, b) for _, _, a, b in segs])
+    total = max(total_s, sum(d for _, d, _, _ in segs)) or 1
+    top = top or max([1.3] + [max(a, b) for _, _, a, b in segs])
     parts = []
     for start, dur, a, b in segs:
         x0 = start / total * width
@@ -80,10 +81,45 @@ def svg_profile(steps: list[dict], width: int = 600, height: int = 80) -> str:
         colour = _zone_colour((a + b) / 2)
         parts.append(f'<polygon points="{x0:.1f},{height} {x0:.1f},{ya:.1f} {x1:.1f},{yb:.1f} {x1:.1f},{height}" '
                      f'fill="{colour}"/>')
+    return _svg(parts, width, height, top, label)
+
+
+def _svg(parts: list[str], width: int, height: int, top: float, label: str) -> str:
     ftp_y = height - 1 / top * height
     parts.append(f'<line x1="0" x2="{width}" y1="{ftp_y:.1f}" y2="{ftp_y:.1f}" class="ftp-line"/>')
     return (f'<svg viewBox="0 0 {width} {height}" preserveAspectRatio="none" class="workout-svg" '
-            f'role="img" aria-label="Workout profile">{"".join(parts)}</svg>')
+            f'role="img" aria-label="{label}">{"".join(parts)}</svg>')
+
+
+def svg_ride(watts: list[float], ftp: float, elapsed_s: int, width: int = 600, height: int = 80, total_s: int = 0,
+             top: float = 0) -> str:
+    """A ridden power trace drawn like a planned workout: one block per sample, coloured by zone."""
+    total = max(total_s, elapsed_s) or 1
+    per = elapsed_s / len(watts) / total * width
+    top = top or max(1.3, max(watts) / ftp)
+    by_colour: dict[str, list[str]] = {}  # one path per zone colour: a ride is ~6 elements, not 240
+    for i, w in enumerate(watts):
+        if w > 0:
+            h = min(w / ftp, top) / top * height
+            by_colour.setdefault(_zone_colour(w / ftp), []).append(f"M{i * per:.1f} {height}v-{h:.1f}h{per + 0.3:.1f}v{h:.1f}z")
+    parts = [f'<path d="{"".join(d)}" fill="{c}"/>' for c, d in by_colour.items()]
+    return _svg(parts, width, height, top, "Ridden power by zone")
+
+
+def ride_profiles(a: dict, planned: dict | None) -> dict | None:
+    """SVGs for a ride with power: what was ridden and, for a planned Zwift workout, what was planned, on one
+    time axis and power scale. None for rides without power."""
+    watts, ftp = a.get("spark_watts") or [], a.get("ftp_used") or 0
+    elapsed = a.get("elapsed_time") or a.get("moving_time") or 0
+    if len(watts) < 10 or not ftp or not elapsed:
+        return None
+    steps = (planned or {}).get("steps") or []
+    total = max(elapsed, total_seconds(steps)) if steps else elapsed
+    # Scale to the 95th percentile, so one sprint doesn't flatten the whole ride
+    top = max([1.3, sorted(watts)[int(len(watts) * 0.95)] / ftp] + [max(lo, hi) for _, _, lo, hi in segments(steps)])
+    return {"ridden": svg_ride(watts, ftp, elapsed, total_s=total, top=top),
+            "planned": svg_profile(steps, total_s=total, top=top, label="Planned workout") if steps else None,
+            "planned_title": planned["title"] if planned else None}
 
 
 def _zone_colour(p: float) -> str:

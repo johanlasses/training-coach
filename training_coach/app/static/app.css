@@ -123,6 +123,48 @@ details.data th:first-child, details.data td:first-child { text-align: left; }
 .feed-stats { display: flex; gap: 18px; flex-wrap: wrap; margin-top: 8px; }
 .feed-stats div { font-size: 12px; color: var(--text-secondary); }
 .feed-stats b { display: block; font-size: 16px; color: var(--text-primary); font-weight: 600; }
+.feed-item.latest { border-color: var(--axis); padding: 16px; }
+.eyebrow { font-size: 12px; color: var(--text-secondary); text-transform: uppercase; letter-spacing: .04em; margin-bottom: 4px; }
+.ride-visual .workout-svg { height: 56px; }
+.feed-item.latest .ride-visual .workout-svg { height: 72px; }
+.ride-visual .planned .workout-svg { margin-top: 2px; opacity: .8; }  /* same height: both share one power scale */
+.planned-label { font-size: 12px; color: var(--text-muted); margin-top: 6px; overflow-wrap: anywhere; }
+.ride-feedback { margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--border); font-size: 15px; }
+.ride-feedback p { margin: 4px 0 0; color: var(--text-secondary); overflow-wrap: anywhere; }
+.ride-feedback .more { display: inline-block; margin-top: 6px; font-size: 13px; color: var(--text-muted); }
+.ride-feedback.compact { margin-top: 8px; padding-top: 6px; font-size: 14px; }
+.card .ride-visual .workout-svg { height: 80px; }
+.coach-feedback h2 { font-size: 17px; }
+.coach-feedback .report-body p { margin: 8px 0 0; }
+.coach-feedback .report-body ul { margin: 8px 0 0; padding-left: 20px; }
+.more-rides { margin-bottom: 16px; }
+.more-rides summary { cursor: pointer; font-size: 14px; color: var(--text-secondary); padding: 10px 0; }
+.sub-head { font-size: 14px; margin: 16px 0 0; }
+
+/* Overview status card */
+.status-card { padding: 16px 18px; }
+.status-head { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-bottom: 12px; }
+.status-head .badge { font-size: 14px; padding: 3px 10px; color: var(--text-primary); }
+.status-head .badge .dot { width: 10px; height: 10px; }
+.status-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px 24px; }
+.stat .label { font-size: 12px; color: var(--text-secondary); text-transform: uppercase; letter-spacing: .04em; }
+.stat .value { font-size: 26px; font-weight: 600; margin-top: 2px; }
+.stat .value small { font-size: 14px; font-weight: 400; color: var(--text-secondary); }
+.stat .sub { font-size: 13px; color: var(--text-secondary); overflow-wrap: anywhere; }
+.stat .next { display: block; margin-top: 6px; font-size: 14px; text-decoration: none; overflow-wrap: anywhere; }
+.stat .event-text { color: var(--text-primary); }
+.delta { font-size: 15px; font-weight: 600; color: var(--text-muted); }
+.delta.up { color: var(--success-text); }
+.delta.down { color: var(--critical); }
+.meter { height: 6px; border-radius: 3px; background: var(--grid); margin: 6px 0 4px; overflow: hidden; }
+.meter span { display: block; height: 100%; background: var(--series-1); border-radius: 3px; }
+@media (max-width: 700px) {
+  .status-grid { grid-template-columns: 1fr; gap: 14px; }
+  .stat + .stat { padding-top: 12px; border-top: 1px solid var(--border); }
+}
+.layout.home { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }  /* rides and charts get equal room */
+@media (max-width: 1000px) { .layout.home { grid-template-columns: 1fr; } }
+
 .spark { width: 100%; height: 36px; margin-top: 8px; display: block; }
 .spark.tall { height: 90px; }
 .spark polyline { fill: none; stroke: var(--text-secondary); stroke-width: 1.5; vector-effect: non-scaling-stroke; }
@@ -241,4 +283,6 @@ table.usage td.num { width: auto; }
   .form-page .row input { flex: 1 1 100%; }
   .coach-pick { flex-wrap: wrap; width: 100%; }
   .coach-pick select { flex: 1 1 auto; }
+  .feed-stats { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px 12px; }
+  .feed-stats b { font-size: 15px; }
 }

@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import socket
 
 import httpx
 
@@ -27,14 +28,34 @@ async def _call(method: str, path: str, body: dict | None = None, timeout: float
         return r
 
 
-async def notify(service: str, title: str, message: str) -> None:
+async def notify(service: str, title: str, message: str, data: dict | None = None) -> None:
+    """`data` goes to the companion app as is, e.g. {"url": ...} to open a page when the notification is tapped.
+    Only notify.* services get it: others (persistent_notification.create) reject unknown keys."""
     if not available() or not service or "." not in service:
         return
     domain, name = service.split(".", 1)
+    body = {"title": title, "message": message} | ({"data": data} if data and domain == "notify" else {})
     try:
-        await _call("POST", f"/services/{domain}/{name}", {"title": title, "message": message})
+        await _call("POST", f"/services/{domain}/{name}", body)
     except httpx.HTTPError as e:
         log.warning("Notify failed: %s", e)
+
+
+def addon_slug() -> str:
+    """This add-on's slug, e.g. local_training_coach or 1a2b3c4d_training_coach. Supervisor names the container's
+    host after it with dashes, so it's read from there: no Supervisor API role needed."""
+    return socket.gethostname().replace("-", "_")
+
+
+def panel_url(path: str = "/") -> str | None:
+    """Where the companion app should go to show `path` of this add-on (its ingress panel). None outside HA."""
+    return f"/hassio/ingress/{addon_slug()}{path}" if SUPERVISOR_TOKEN else None
+
+
+def tap(path: str, thread: str = "training") -> dict:
+    """Notification data: open `path` in the add-on on tap, and group the notifications per thread on iOS."""
+    url = panel_url(path)
+    return ({"url": url, "clickAction": url} if url else {}) | {"push": {"thread-id": thread}, "group": thread}
 
 
 async def states() -> list[dict]:
@@ -70,6 +91,7 @@ SENSORS = {
     "week_hours": ("Hours this week", "h", "mdi:timer-outline", None, None),
     "week_km": ("Km this week", "km", "mdi:map-marker-distance", None, None),
     "today_session": ("Today's session", None, "mdi:bike", None, None),
+    "last_ride": ("Last ride", None, "mdi:message-text-outline", None, None),
 }
 STATE_TOPIC = "training_coach/state"
 

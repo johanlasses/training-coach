@@ -12,7 +12,8 @@ Open the panel and go to **Settings**:
    - Create an API application at <https://www.strava.com/settings/api> and set *Authorization Callback Domain* to `localhost`.
    - Enter its Client ID and Client secret, then click **Connect with Strava** and approve.
    - Strava redirects to a `http://localhost/strava-callback?...` page that won't load. Copy that full address and paste it into step 3.
-3. Optionally set a notify service on **Settings** for a morning push with the day's session.
+3. Set a notify service on **Settings** (e.g. `notify.mobile_app_<your_iphone>`). You get a push after every ride
+   with the coach's verdict, and a morning push with the day's session.
 
 Then open **Profile** and set your goals, level, sessions per week, weight, threshold heart rate and availability.
 The coach never plans outside the availability limits.
@@ -30,6 +31,22 @@ The first plan generated for a week is the active one, and it drives today's ses
 notification. **Use this plan** switches it. Each coach's philosophy lives in `app/coaches/<name>.md`.
 
 The first sync imports 12 months of rides. Power detail (NP, power curve, zones) is fetched gradually so Strava's rate limits aren't hit, which can take a few hours.
+
+## Overview and ride feedback
+
+**Overview** opens with your status: form, this week against the plan (sessions done, TSS done of planned, the next
+session), fitness over the last 4 weeks (CTL and FTP change), and the countdown to the next event you told the coach
+about, with where CTL lands by then at the current ramp. Below it is your latest ride, then the five before it.
+Older rides and the charts come after that.
+
+Rides with power are drawn like the planned sessions: blocks coloured by zone. When the ride was a planned Zwift
+workout, the planned profile sits under it on the same time axis and power scale, so a faded rep shows.
+
+**After every new ride** the coach of that week's plan writes a short verdict: how it went against the plan, a
+number that backs it up, and what's next. It reads your Apple Health trends too. The verdict is the notification:
+title and 2–4 sentences, readable on the lock screen. Tap it to open the ride, where the longer version is.
+This runs whenever a Claude API key is set. It isn't a schedule: it's tied to a ride you just did. Only rides from
+the last 48 hours get one, so the first sync doesn't flood your phone. **Ask again** on a ride page writes it anew.
 
 ## Coach chat
 
@@ -89,11 +106,22 @@ You control all of it on **Settings → Schedules**. Claude jobs are off until y
 | Daily | Refresh the Zwift login |
 | Hourly | Read the Apple Health sensors from Home Assistant, if set up (local, free) |
 | Daily 07:00 | Push today's session to your notify service |
+| After each new ride | The coach's feedback, sent as a notification (needs a Claude API key; about $0.001 a ride) |
 | Off | Plan next week with your default coach (e.g. Sunday 20:00). Weeks that already have a plan are skipped |
 | Off | Weekly analysis (e.g. Monday 07:00) |
 
 A scheduled job only starts in the 3 hours after its time, so a restart in the afternoon doesn't run the morning's jobs.
-**Claude usage** on the same page shows calls and tokens per plan, analysis and chat, by week, by month and in total.
+**Claude usage** on the same page shows calls, tokens and the estimated cost per call type, by week, by month and in
+total.
+
+## Which Claude model does what
+
+| Call | Model | Why |
+|---|---|---|
+| Weekly plan | Opus 5.5, high effort | Hard rules, a validator and a structured workout; it runs about once a week |
+| Analysis | Opus 5.5, high effort | The deep read of your training; about once a week |
+| Coach chat | Sonnet 5.5, medium effort | Interactive, so it's faster. Plan edits are still checked and retried |
+| Ride feedback | Haiku 5.5 | The add-on computes the numbers; the model only judges and writes. It runs after every ride |
 
 ## Zwift workouts
 

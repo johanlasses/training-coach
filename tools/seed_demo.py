@@ -71,13 +71,13 @@ ws = stats.week_start(today)
 days = []
 for i in range(7):
     d = (ws + timedelta(days=i)).isoformat()
-    if i == 1:
+    if i == today.weekday():  # the latest ride follows this one, so the Overview shows ridden vs planned
         days.append({"date": d, "kind": "zwift", "title": "Sweet spot 3×12", "description": "Steady sweet spot, smooth pedalling.",
                      "duration_min": 66, "intensity": "sweetspot", "target_tss": 70, "bike": "trainer", "terrain": "",
                      "steps": [step("warmup", duration_s=600, power_low=0.45, power_high=0.75),
                                step("intervals", repeat=3, on_s=720, off_s=240, on_power=0.9, off_power=0.55, cadence=90, text="Settle in"),
                                step("cooldown", duration_s=480, power_low=0.6, power_high=0.4)]})
-    elif i == 5:
+    elif i == 5 and i != today.weekday():
         days.append({"date": d, "kind": "outdoor", "title": "Long gravel endurance", "description": "Z2, fuel every 30 min.",
                      "duration_min": 150, "intensity": "endurance", "target_tss": 120, "bike": "gravel",
                      "terrain": "Forest roads north of Västerås", "steps": []})
@@ -86,6 +86,36 @@ for i in range(7):
                      "intensity": "recovery", "target_tss": 0, "bike": "none", "terrain": "", "steps": []})
 plan_id = db.save_plan(ws.isoformat(), datetime.now().isoformat(timespec="seconds"), "demo",
                        {"week_focus": "Build aerobic base", "rationale": "Demo plan.", "days": days, "block_week": 2}, [])
+
+# Today's ride: the planned workout, with the last rep fading, and the coach's feedback on it
+ftp = db.activities(limit=1)[0]["ftp_used"]
+from app import workouts  # noqa: E402
+plan_steps = next(d for d in days if d["date"] == today.isoformat())["steps"]
+watts = []
+for start, dur, lo, hi in workouts.segments(plan_steps):
+    for t in range(dur):
+        target = (lo + (hi - lo) * t / dur) * ftp
+        fade = 0.93 if start >= 2 * 960 + 600 and lo >= 0.88 else 1
+        watts.append(max(0, random.gauss(target * fade, 6)))
+n = len(watts)
+start = datetime.combine(today, datetime.min.time()).replace(hour=7)
+aid += 1
+db.upsert_activity_summary({
+    "id": aid, "name": "Zwift - Sweet spot 3x12 in Watopia", "sport_type": "VirtualRide", "start_date": start.isoformat() + "Z",
+    "start_date_local": start.isoformat(), "distance": 34000, "moving_time": n, "elapsed_time": n,
+    "elevation_gain": 320, "trainer": 1, "avg_watts": sum(watts) / n, "weighted_avg_watts": None,
+    "max_watts": max(watts), "device_watts": 1, "avg_hr": 146, "max_hr": 168, "kilojoules": sum(watts) / 1000, "avg_speed": 8.5})
+db.update_activity(aid, streams_fetched=1, notified=1, feedback={
+    "headline": "Two strong reps, the third faded",
+    "notification": "Reps 1 and 2 sat right on 90% FTP. Rep 3 dropped about 7%, so the last block was tempo, not sweet "
+                    "spot. Eat well tonight: tomorrow is rest, then the long gravel day.",
+    "detail": "Reps 1 and 2 were textbook: within 2% of target, cadence steady.\n\nRep 3 averaged about 7% under "
+              "target. That's the edge of your current sweet spot durability, and it's the thing to build. Next time, "
+              "start rep 3 at the low end of the range rather than fading into it.\n\nHRV and resting HR are on "
+              "baseline, so this wasn't fatigue showing. **Next:** rest tomorrow, then Saturday's long gravel ride in Z2.",
+    "coach": "nextlevel", "model": "claude-haiku-5-5", "at": datetime.now().isoformat(timespec="seconds")},
+    **process_streams({"time": list(range(n)), "watts": watts, "heartrate": [130 + w * 0.08 for w in watts]}))
+recompute(db, cfg)
 
 # Coach chat with a pending proposal, coach notes, Apple Health values and Claude usage
 now = datetime.now().isoformat(timespec="seconds")
@@ -120,8 +150,11 @@ class _Msg:
         self.usage = _Usage(i, o)
 
 
-for purpose, i, o in [("plan", 14200, 9800), ("analysis", 9100, 4200), ("chat", 16300, 1100)]:
-    db.log_llm(now, purpose, _Msg(i, o))
+for purpose, model, i, o in [("plan", "claude-opus-5-5", 14200, 9800), ("analysis", "claude-opus-5-5", 9100, 4200),
+                             ("chat", "claude-sonnet-5-5", 16300, 1100), ("ride", "claude-haiku-5-5", 5200, 900)]:
+    m = _Msg(i, o)
+    m.model = model
+    db.log_llm(now, purpose, m)
 db.save_analysis(datetime.now().isoformat(timespec="seconds"), "manual", "demo",
                  "## Current form\nDemo report.\n\n## Limiters\n- 20-min power lags the 5-min power.\n")
 print(f"Seeded {len(db.activities())} rides into {data / 'training.db'}")

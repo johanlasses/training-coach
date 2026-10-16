@@ -82,7 +82,7 @@ def process_streams(s: dict[str, list]) -> dict:
         out["np"] = metrics.normalized_power(watts)
         out["mmp"] = metrics.mmp(watts)
         out["power_hist"] = metrics.power_histogram(watts)
-        out["spark_watts"] = metrics.downsample(watts)
+        out["spark_watts"] = metrics.downsample(watts, 240)  # ~15 s blocks on an hour: intervals stay visible
         if hr:
             out["decoupling"] = metrics.decoupling(watts, hr)
     if hr:

@@ -6,7 +6,7 @@
 <section class="card">
   <h2>Claude (AI coach and analysis)</h2>
   <p class="caption">Create a key at <a href="https://console.anthropic.com/settings/keys" target="_blank" rel="noopener">console.anthropic.com</a>.
-    The coach only runs when you ask. A plan plus an analysis a week costs roughly a few dollars a month.</p>
+    Plans, analyses and chat run when you ask or schedule them; feedback runs after each ride. A plan plus an analysis a week costs a dollar or two a month, ride feedback a tenth of a cent a ride.</p>
   <form method="post" action="{{ base }}/settings">
     <label>API key
       <input type="password" name="anthropic_api_key" autocomplete="off"
@@ -89,13 +89,15 @@
       </select>{{ when(schedule.sync) }}</label>
     <label class="inline"><input type="checkbox" name="zwift_refresh" {{ 'checked' if cfg.zwift_refresh }}> Daily Zwift login refresh {{ when(schedule.zwift) }}</label>
     <p class="hint-row">Apple Health from Home Assistant: {{ when(schedule.health) }} <span class="muted">(local, set up on Profile)</span></p>
-    <h3>Morning notification</h3>
+    <h3>Notifications</h3>
     <div class="grid2 wide-first">
       <label>Notify service <input name="notify_service" value="{{ cfg.notify_service }}" placeholder="notify.mobile_app_…">
-        <small>Leave empty to disable.</small></label>
+        <small>Ride feedback, the morning session and job notices go here. Leave empty to turn them all off.</small></label>
       <label>Time <input type="time" name="notify_time" value="{{ cfg.notify_time }}">{{ when(schedule.notify) }}</label>
     </div>
     <h3>Claude jobs</h3>
+    <p class="hint-row">Ride feedback: <small class="hint">after every new ride, always on with a Claude API key{% if last_feedback %} · last: {{ last_feedback }}{% endif %}</small><br>
+      <span class="muted">The coach's verdict goes in the notification for the ride. It's sent to the notify service above, so set that even if the morning time is empty.</span></p>
     <label class="inline"><input type="checkbox" name="auto_plan" {{ 'checked' if cfg.auto_plan }}> Plan next week automatically</label>
     <div class="grid2">
       <label>Day <select name="auto_plan_day">{% for k, n in day_names.items() %}<option value="{{ k }}" {{ 'selected' if k == cfg.auto_plan_day }}>{{ n }}</option>{% endfor %}</select></label>
@@ -114,15 +116,18 @@
 
 <section class="card">
   <h2>Claude usage</h2>
-  <p class="caption">Tokens per call type. Input includes cached tokens.</p>
+  <p class="caption">Tokens per call type. Input includes cached tokens. Cost is an estimate from list prices.
+    Plan and analysis run on Opus (they need the reasoning), chat on Sonnet, and ride feedback on Haiku (it runs
+    after every ride).</p>
   {% for period, rows in usage.items() %}
   <h3>{{ period }}</h3>
   {% if rows %}
   <table class="zones usage">
-    <tr class="muted"><td>Call</td><td class="num">Calls</td><td class="num">Input</td><td class="num">Output</td></tr>
+    <tr class="muted"><td>Call</td><td class="num">Calls</td><td class="num">Input</td><td class="num">Output</td><td class="num">Cost</td></tr>
     {% for purpose, u in rows.items() %}
-    <tr><td>{{ purpose | capitalize }}</td><td class="num">{{ u.calls }}</td>
-      <td class="num">{{ '{:,}'.format(u.input_tokens or 0) }}</td><td class="num">{{ '{:,}'.format(u.output_tokens or 0) }}</td></tr>
+    <tr><td>{{ {'ride': 'Ride feedback'}.get(purpose, purpose | capitalize) }}<br><small class="muted">{{ u.models | map('replace', 'claude-', '') | join(', ') }}</small></td><td class="num">{{ u.calls }}</td>
+      <td class="num">{{ '{:,}'.format(u.input_tokens or 0) }}</td><td class="num">{{ '{:,}'.format(u.output_tokens or 0) }}</td>
+      <td class="num">{{ '<$0.01' if 0 < u.cost < 0.005 else '$%.2f' % u.cost }}</td></tr>
     {% endfor %}
   </table>
   {% else %}<p class="muted">No calls.</p>{% endif %}

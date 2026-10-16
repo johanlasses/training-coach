@@ -8,6 +8,7 @@ lie about mobile. This uses Playwright mobile emulation with the locally install
   .venv/bin/python tools/mobile_check.py /plan --light   # specific pages, light mode
   .venv/bin/python tools/mobile_check.py --desktop       # 1280 px browser window instead of an iPhone
   .venv/bin/python tools/mobile_check.py --desktop --width=1000   # e.g. inside HA's ingress frame
+  .venv/bin/python tools/mobile_check.py / --screens=2   # only the first two screens, readable at full size
 
 Needs the app running (default http://localhost:8099, override with TC_URL). Exit code 1 on overflow.
 """
@@ -61,7 +62,12 @@ def main() -> int:
             page.wait_for_timeout(500)
             name = path.strip("/").replace("/", "-") or "home"
             shot = SHOTS / f"{device}-{name}-{scheme}.png"
-            page.screenshot(path=str(shot), full_page=True)
+            screens = next((int(a.split("=")[1]) for a in sys.argv if a.startswith("--screens=")), 0)
+            if screens:  # only the first N screen heights: what you see without scrolling far
+                h = min(page.evaluate("document.documentElement.scrollHeight"), screens * page.viewport_size["height"])
+                page.screenshot(path=str(shot), full_page=True, clip={"x": 0, "y": 0, "width": page.viewport_size["width"], "height": h})
+            else:
+                page.screenshot(path=str(shot), full_page=True)
             r = page.evaluate(OVERFLOW_JS)
             ok = r["scroll"] <= r["vw"] and not r["offenders"]
             failed |= not ok

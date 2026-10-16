@@ -1,35 +1,79 @@
 {% extends "base.html" %}
-{% from "_macros.html" import ride_type, spark, form_status %}
+{% from "_macros.html" import ride_card with context %}
 {% set page = 'home' %}
 {% block content %}
+{% set w, t, ev = status.week, status.trend, status.event %}
+<section class="card status-card">
+  <div class="status-head">
+    <span class="badge"><span class="dot" style="background:var(--{{ status.form_colour }})"></span>{{ status.form }}</span>
+    <span class="muted">Form {{ '%+d' % status.tsb }}</span>
+  </div>
+  <div class="status-grid">
+    <div class="stat">
+      <div class="label">This week</div>
+      {% if w.plan %}
+      <div class="value">{{ w.done }}<small>/{{ w.sessions }} sessions</small></div>
+      {% set pct = ((w.tss_done / w.tss_planned * 100) if w.tss_planned else 0) | round | int %}
+      <div class="meter" role="img" aria-label="TSS {{ w.tss_done }} of {{ w.tss_planned }}"><span style="width: {{ [pct, 100] | min }}%"></span></div>
+      <div class="sub">TSS {{ w.tss_done }} of {{ w.tss_planned }}{% if w.missed %} · {{ w.missed }} missed{% endif %}</div>
+      {% if w.partial %}<div class="sub">{{ w.partial }} partly done</div>{% endif %}
+      {% if w.next %}<a class="next" href="{{ base }}/plan">{{ 'Today' if w.next_is_today else w.next.date | day_label }}: <b>{{ w.next.title }}</b> · {{ w.next.duration_min }} min</a>
+      {% else %}<div class="sub">The plan for this week is done.</div>{% endif %}
+      {% else %}
+      <div class="value">{{ w.rides }}<small> rides</small></div>
+      <div class="sub">TSS {{ w.tss_done }}. No plan this week.</div>
+      <a class="next" href="{{ base }}/plan">Plan the week →</a>
+      {% endif %}
+    </div>
+    <div class="stat">
+      <div class="label">Fitness</div>
+      <div class="value">{{ t.ctl }} <small>CTL</small> <span class="delta {{ 'up' if t.ctl_change > 0 else 'down' if t.ctl_change < 0 }}">{{ '↑' if t.ctl_change > 0 else '↓' if t.ctl_change < 0 else '→' }} {{ '%+.1f' % t.ctl_change }}</span></div>
+      <div class="sub">over 4 weeks, {{ '%+.1f' % t.ctl_ramp }} a week</div>
+      <div class="sub">FTP {{ t.ftp }} W{% if t.ftp_change %} ({{ '%+d' % t.ftp_change }} in 6 weeks){% endif %} · {{ t.wkg }} W/kg</div>
+    </div>
+    <div class="stat">
+      <div class="label">Next event</div>
+      {% if ev %}
+      <div class="value">{% if ev.days >= 14 %}{{ (ev.days / 7) | round | int }}<small> weeks</small>{% else %}{{ ev.days }}<small> {{ 'day' if ev.days == 1 else 'days' }}</small>{% endif %}</div>
+      <div class="sub event-text">{{ ev.text }} · {{ ev.date | day_label }}</div>
+      {% if ev.ctl_projected is not none %}<div class="sub">CTL about {{ ev.ctl_projected }} by then if your load stays as it's been</div>{% endif %}
+      {% else %}
+      <div class="sub">No event yet.</div>
+      <a class="next" href="{{ base }}/coach">Tell the coach about one →</a>
+      {% endif %}
+    </div>
+  </div>
+</section>
 
-{% if session %}
-<div class="notice"><b>Today:</b> {{ session.title }} · {{ session.duration_min }} min ·
-  <a href="{{ base }}/plan">see plan</a></div>
-{% endif %}
+<div class="layout home">
+  <section class="rides">
+    {% if latest %}
+      {{ ride_card(latest, planned.get(latest.start_date_local[:10]), latest=True) }}
+      {% if not latest.feedback and feedback_running %}<p class="muted">The coach is writing feedback on this ride…</p>{% endif %}
+      {% if feed %}<h2 class="section-title">Recent rides</h2>{% endif %}
+      {% for a in feed[:5] %}{{ ride_card(a, planned.get(a.start_date_local[:10])) }}{% endfor %}
+      {% if feed | length > 5 %}
+      <details class="more-rides"><summary>Older rides ({{ feed | length - 5 }})</summary>
+        {% for a in feed[5:] %}{{ ride_card(a, planned.get(a.start_date_local[:10]), visual=False) }}{% endfor %}
+      </details>
+      {% endif %}
+    {% else %}
+    <p class="muted">No rides yet. Once Strava is configured, the first sync pulls the last 12 months.</p>
+    {% endif %}
+  </section>
 
-<div class="tiles">
-  <div class="tile"><div class="label">FTP</div>
-    <div class="value">{{ d.ftp }} <small>W</small></div>
-    <div class="sub">{{ d.wkg }} W/kg · {{ {'eftp': 'estimated', 'override': 'set manually', 'default': 'default, no power data'}[d.ftp_source] }}</div></div>
-  <div class="tile"><div class="label">Fitness · CTL</div><div class="value">{{ d.ctl | round | int }}</div>
-    <div class="sub">42-day load</div></div>
-  <div class="tile"><div class="label">Fatigue · ATL</div><div class="value">{{ d.atl | round | int }}</div>
-    <div class="sub">7-day load</div></div>
-  <div class="tile"><div class="label">Form · TSB</div><div class="value">{{ '%+d' % (d.tsb | round | int) }}</div>
-    <div class="sub">{{ form_status(d.tsb) }}</div></div>
-  <div class="tile"><div class="label">This week</div><div class="value">{{ d.this_week.hours }} <small>h</small></div>
-    <div class="sub">{{ d.this_week.km }} km · {{ d.this_week.rides }} rides · TSS {{ d.this_week.tss }}</div></div>
-  <div class="tile"><div class="label">Last 7 days</div><div class="value">{{ d.last7.rides }} <small>rides</small></div>
-    <div class="sub">{{ d.last7.hours }} h · {{ d.last7.km }} km</div></div>
-  <div class="tile"><div class="label">Last 30 days</div><div class="value">{{ d.last30.rides }} <small>rides</small></div>
-    <div class="sub">{{ d.last30.hours }} h · {{ d.last30.km }} km · {{ d.last30.indoor_rides }} indoor</div></div>
-  <div class="tile"><div class="label">Year to date</div><div class="value">{{ '{:,}'.format(d.ytd.km).replace(',', ' ') }} <small>km</small></div>
-    <div class="sub">{{ d.ytd.hours }} h · {{ d.ytd.rides }} rides · {{ '{:,}'.format(d.ytd.elevation).replace(',', ' ') }} m</div></div>
-</div>
-
-<div class="layout">
-  <section>
+  <section class="trends">
+    <h2 class="section-title">Trends</h2>
+    <div class="tiles">
+      <div class="tile"><div class="label">This week</div><div class="value">{{ d.this_week.hours }} <small>h</small></div>
+        <div class="sub">{{ d.this_week.km }} km · {{ d.this_week.rides }} rides</div></div>
+      <div class="tile"><div class="label">Last 7 days</div><div class="value">{{ d.last7.rides }} <small>rides</small></div>
+        <div class="sub">{{ d.last7.hours }} h · {{ d.last7.km }} km</div></div>
+      <div class="tile"><div class="label">Last 30 days</div><div class="value">{{ d.last30.rides }} <small>rides</small></div>
+        <div class="sub">{{ d.last30.hours }} h · {{ d.last30.indoor_rides }} indoor</div></div>
+      <div class="tile"><div class="label">Year to date</div><div class="value">{{ '{:,}'.format(d.ytd.km).replace(',', ' ') }} <small>km</small></div>
+        <div class="sub">{{ d.ytd.hours }} h · {{ d.ytd.rides }} rides</div></div>
+    </div>
     <div class="card">
       <h2>Fitness and fatigue</h2>
       <p class="caption">Training load, last 90 days. Fitness rising steadily is the goal; fatigue spikes are hard weeks.</p>
@@ -75,30 +119,6 @@
       </table>
     </div>
     {% endif %}
-  </section>
-
-  <section>
-    <h2 class="section-title">Recent rides</h2>
-    {% for a in feed %}
-    <a class="feed-item" href="{{ base }}/activity/{{ a.id }}">
-      <div class="feed-head">
-        <span class="feed-title">{{ a.name }}</span>
-        <span class="feed-meta">{{ ride_type(a) }}</span>
-      </div>
-      <div class="feed-meta">{{ a.start_date_local[:10] }} {{ a.start_date_local[11:16] }}</div>
-      <div class="feed-stats">
-        <div><b>{{ ((a.distance or 0) / 1000) | round(1) }} km</b>Distance</div>
-        <div><b>{{ a.moving_time | duration }}</b>Time</div>
-        {% if a.elevation_gain %}<div><b>{{ a.elevation_gain | round | int }} m</b>Elevation</div>{% endif %}
-        {% if a.np %}<div><b>{{ a.np | round | int }} W</b>NP</div>{% elif a.avg_watts %}<div><b>{{ a.avg_watts | round | int }} W</b>Avg power</div>{% endif %}
-        {% if a.tss %}<div><b>{{ a.tss | round | int }}</b>TSS{% if a.tss_source != 'power' %} ({{ a.tss_source }}){% endif %}</div>{% endif %}
-        {% if a.avg_hr %}<div><b>{{ a.avg_hr | round | int }}</b>Avg HR</div>{% endif %}
-      </div>
-      {{ spark(a.spark_watts or a.spark_hr, 'Power over the ride' if a.spark_watts else 'Heart rate over the ride') }}
-    </a>
-    {% else %}
-    <p class="muted">No rides yet. Once Strava is configured, the first sync pulls the last 12 months.</p>
-    {% endfor %}
   </section>
 </div>
 {% endblock %}

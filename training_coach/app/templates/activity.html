@@ -1,11 +1,27 @@
 {% extends "base.html" %}
-{% from "_macros.html" import ride_type, spark %}
+{% from "_macros.html" import ride_type, spark, ride_visual with context %}
 {% set page = 'home' %}
 {% block content %}
 <p><a href="{{ base }}/">← Overview</a></p>
 <h2 class="page-title">{{ a.name }}</h2>
 <p class="muted">{{ ride_type(a) }} · {{ a.start_date_local[:10] }} {{ a.start_date_local[11:16] }} ·
   <a href="https://www.strava.com/activities/{{ a.id }}" target="_blank" rel="noopener">Open on Strava</a></p>
+
+<div class="card coach-feedback">
+  {% if a.feedback %}
+  <div class="card-head"><h2>{{ a.feedback.headline }}</h2>
+    {% if ai_ok %}<form method="post" action="{{ base }}/activity/{{ a.id }}/feedback"><button class="secondary" {{ 'disabled' if jobs.ride_feedback and jobs.ride_feedback.running }}>Ask again</button></form>{% endif %}</div>
+  <div class="report-body">{{ fb_html | safe }}</div>
+  <p class="msg-meta">{{ fb_coach }} · {{ a.feedback.at[:16] | replace('T', ' ') }}</p>
+  {% elif (jobs.ride_feedback and jobs.ride_feedback.running) or (jobs.feedback and jobs.feedback.running and not a.notified) %}
+  <p class="muted flush">The coach is writing feedback on this ride…</p>
+  {% elif ai_ok %}
+  <div class="card-head"><p class="muted flush">No coach feedback on this ride yet.</p>
+    <form method="post" action="{{ base }}/activity/{{ a.id }}/feedback"><button>Ask the coach</button></form></div>
+  {% else %}
+  <p class="muted flush">Add a Claude API key in Settings to get the coach's feedback after every ride.</p>
+  {% endif %}
+</div>
 
 <div class="tiles">
   <div class="tile"><div class="label">Distance</div><div class="value">{{ ((a.distance or 0) / 1000) | round(1) }} <small>km</small></div></div>
@@ -22,7 +38,12 @@
   {% if a.kilojoules %}<div class="tile"><div class="label">Work</div><div class="value">{{ a.kilojoules | round | int }} <small>kJ</small></div></div>{% endif %}
 </div>
 
-{% if a.spark_watts or a.spark_hr %}
+{% if a.spark_watts and a.ftp_used %}
+<div class="card"><h2>Power by zone</h2>
+  <p class="caption">{% if planned and planned.steps %}What you rode, above what was planned, on one time axis.{% else %}Coloured by zone at FTP {{ a.ftp_used | round | int }} W. The dashed line is FTP.{% endif %}</p>
+  {{ ride_visual(a, planned) }}
+  {% if a.spark_hr %}<h2 class="sub-head">Heart rate</h2>{{ spark(a.spark_hr, 'Heart rate over the ride') }}{% endif %}</div>
+{% elif a.spark_watts or a.spark_hr %}
 <div class="card"><h2>{{ 'Power' if a.spark_watts else 'Heart rate' }} over the ride</h2>
   {{ spark(a.spark_watts or a.spark_hr, 'profile', 'tall') }}</div>
 {% endif %}

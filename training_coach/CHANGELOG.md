@@ -1,5 +1,33 @@
 # Changelog
 
+## 0.5.0 (2026-10-16)
+
+Built for the Home Assistant iPhone app.
+
+- **A notification after every ride, with the coach's verdict.** When a new ride syncs, the coach of that week's plan
+  judges it against the plan (rep by rep for Zwift workouts), with your form, the week so far and your Apple Health
+  trends, and says what's next. The verdict is the notification: tap it to open the ride and read the longer version.
+  It runs whenever a Claude API key is set, with no schedule to switch on. Only rides from the last 48 hours get one.
+  **Ask again** on a ride page writes it anew.
+- **A status card at the top of Overview:** form, this week against the plan (sessions done, TSS done of planned,
+  what's next), CTL and FTP over the last weeks, and the countdown to your next event with where CTL lands by then.
+- **The latest ride comes right after it**, with the coach's verdict. Then the five before it. Older rides fold away,
+  and the charts come after the rides on phones.
+- **Rides look like the plan:** power is drawn as blocks coloured by zone, like the planned sessions. When the ride was
+  a planned Zwift workout, the plan sits under it on the same time axis and scale, so a faded rep shows. Power detail
+  is now sampled about every 15 s on an hour's ride, so intervals stay visible. Rides synced before this update keep
+  the coarser 30 s detail.
+- **Cheaper Claude usage.** Plan and analysis stay on Opus 5.5, chat moves to Sonnet 5.5, and ride feedback uses
+  Haiku 5.5 (about $0.001 a ride). **Settings → Claude usage** shows the model and estimated cost per call type.
+- **The feedback reads the ride the way a coach would.** The plan is lined up with the ride first, so starting the
+  workout a few minutes late doesn't fail every rep. A ride that didn't follow the workout is judged as a ride, not
+  rep by rep. If every rep is off by the same amount, it says Zwift's FTP setting differs from yours, rather than
+  blaming you. A session ridden on another day of the week is matched by its name. Tests are judged on pacing and
+  result. Readiness from Apple Health follows the same rule as the planner.
+- **Form on the status card** uses the planner's limits: high fatigue below −25, and "losing fitness" above +25.
+- Notifications open the right page when tapped (ride, plan or analysis) and are grouped per kind on iOS.
+- New sensor `sensor.training_last_ride` with the coach's headline on your last ride.
+
 ## 0.4.3 (2026-10-16)
 
 The add-on can now talk to Home Assistant. A startup bug had blocked that in every earlier version, so these

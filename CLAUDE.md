@@ -34,7 +34,11 @@ CI (`.github/workflows/test.yml`) runs ruff and pytest on push.
   (`app/season.py`), and the athlete swaps days themselves.
 - **Ingress:** every URL in templates and redirects must be prefixed with `{{ base }}` / `back(request, …)`.
 - **Anthropic SDK 1.x uses httpx2.** respx can't mock it. Inject `httpx2.MockTransport` (see `tests/test_llm.py`).
-  Model `claude-opus-5-5`, adaptive thinking, `fallbacks="default"` with beta `server-side-fallback-2026-07-01`.
+  One model per purpose in `llm.MODELS`: Opus 5.5 for plan and analysis, Sonnet 5.5 for chat, Haiku 5.5 for ride
+  feedback. Adaptive thinking; `fallbacks="default"` with beta `server-side-fallback-2026-07-01` only on Opus and
+  Sonnet (Haiku has no server-side fallback).
+- **Ride feedback is event-driven, not scheduled:** it runs after each sync for rides from the last 48 h
+  (`feedback.after_sync`), once per ride (`activities.notified`). It's always on with an API key.
 - **Strava rate limits:** stream fetches are capped per sync run and stop near the 15-minute limit. Keep it that way.
   Tests never hit real APIs.
 - **Charts:** use the colour tokens in `static/app.css` (the dataviz reference palette). No dual axes; TSB has its own chart.

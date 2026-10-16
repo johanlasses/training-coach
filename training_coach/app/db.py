@@ -37,6 +37,8 @@ CREATE TABLE IF NOT EXISTS activities (
     decoupling REAL,          -- Pw:HR drift %, steady rides only
     spark_watts TEXT,         -- JSON list, downsampled
     spark_hr TEXT,
+    feedback TEXT,            -- JSON {headline, notification, detail, coach, model, at} from the post-ride coach call
+    notified INTEGER DEFAULT 0, -- 1 once the post-ride notification went out (or the ride was too old for one)
     ftp_used REAL,
     tss REAL,
     intensity REAL,
@@ -102,7 +104,7 @@ ACTIVITY_COLUMNS = [
     "elapsed_time", "elevation_gain", "trainer", "avg_watts", "weighted_avg_watts", "max_watts",
     "device_watts", "avg_hr", "max_hr", "kilojoules", "avg_speed",
 ]
-JSON_COLUMNS = {"mmp", "power_hist", "spark_watts", "spark_hr"}
+JSON_COLUMNS = {"mmp", "power_hist", "spark_watts", "spark_hr", "feedback"}
 
 
 class DB:
@@ -113,6 +115,12 @@ class DB:
         for table in ("plans", "analyses"):  # added in 0.3.0
             if "coach" not in {r["name"] for r in self.conn.execute(f"PRAGMA table_info({table})")}:
                 self.conn.execute(f"ALTER TABLE {table} ADD COLUMN coach TEXT")
+        cols = {r["name"] for r in self.conn.execute("PRAGMA table_info(activities)")}
+        for col, decl in (("feedback", "TEXT"), ("notified", "INTEGER DEFAULT 0")):  # added in 0.5.0
+            if col not in cols:
+                self.conn.execute(f"ALTER TABLE activities ADD COLUMN {col} {decl}")
+                if col == "notified":  # rides from before the upgrade were seen already: no pushes for them
+                    self.conn.execute("UPDATE activities SET notified=1")
         self.conn.commit()
 
     # --- kv -------------------------------------------------------------
@@ -176,6 +184,13 @@ class DB:
     def activities_missing_streams(self, limit: int) -> list[dict]:
         rows = self.conn.execute(
             "SELECT * FROM activities WHERE streams_fetched=0 ORDER BY start_date DESC LIMIT ?", (limit,)
+        ).fetchall()
+        return [_row(r) for r in rows]
+
+    def activities_to_notify(self, since_utc: str) -> list[dict]:
+        """Rides started at or after `since_utc` that haven't had their post-ride notification, oldest first."""
+        rows = self.conn.execute(
+            "SELECT * FROM activities WHERE notified=0 AND start_date >= ? ORDER BY start_date", (since_utc,)
         ).fetchall()
         return [_row(r) for r in rows]
 
@@ -246,13 +261,26 @@ class DB:
             (ts, purpose, msg.model, u.input_tokens, u.output_tokens, getattr(u, "cache_read_input_tokens", 0) or 0))
         self.conn.commit()
 
-    def llm_usage(self, since: str | None = None) -> dict[str, dict]:
-        """{purpose: {calls, input_tokens, output_tokens}} for calls at or after `since`."""
+    def llm_usage(self, since: str | None = None, cost=None) -> dict[str, dict]:
+        """{purpose: {calls, input_tokens, output_tokens, models, cost}} for calls at or after `since`. `cost` is
+        llm.cost (passed in to keep the db free of the SDK); without it the cost is 0."""
         rows = self.conn.execute(
-            "SELECT purpose, COUNT(*) AS calls, SUM(input_tokens + cache_read_tokens) AS input_tokens, "
-            "SUM(output_tokens) AS output_tokens FROM llm_calls WHERE ts >= ? GROUP BY purpose ORDER BY purpose",
-            (since or "",)).fetchall()
-        return {r["purpose"]: dict(r) for r in rows}
+            "SELECT purpose, model, COUNT(*) AS calls, SUM(input_tokens) AS input_tokens, SUM(cache_read_tokens) AS "
+            "cache_read, SUM(output_tokens) AS output_tokens FROM llm_calls WHERE ts >= ? GROUP BY purpose, model "
+            "ORDER BY purpose, model", (since or "",)).fetchall()
+        out: dict[str, dict] = {}
+        for r in rows:
+            u = out.setdefault(r["purpose"], {"calls": 0, "input_tokens": 0, "output_tokens": 0, "models": [], "cost": 0.0})
+            u["calls"] += r["calls"]
+            u["input_tokens"] += (r["input_tokens"] or 0) + (r["cache_read"] or 0)
+            u["output_tokens"] += r["output_tokens"] or 0
+            u["models"].append(r["model"])
+            if cost:
+                u["cost"] += cost(r["model"], r["input_tokens"] or 0, r["output_tokens"] or 0, r["cache_read"] or 0)
+        return out
+
+    def last_llm_call(self, purpose: str) -> str | None:
+        return self.conn.execute("SELECT MAX(ts) FROM llm_calls WHERE purpose=?", (purpose,)).fetchone()[0]
 
     # --- chat and coach notes ----------------------------------------------
     def add_chat(self, ts: str, role: str, coach: str, content: str, proposal: dict | None = None,

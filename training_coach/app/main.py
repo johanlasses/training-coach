@@ -6,6 +6,7 @@ import logging
 import time
 from contextlib import asynccontextmanager
 from datetime import date, datetime, timedelta, timezone
+from html import escape as html_escape
 from pathlib import Path
 
 import httpx
@@ -15,7 +16,7 @@ from fastapi.responses import RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
-from . import analysis, chat, coaches, ftptest, ha, health, stats, workouts
+from . import analysis, chat, coaches, feedback, ftptest, ha, health, overview, stats, workouts
 from . import coach as coach_mod
 from . import llm
 from .config import DATA_DIR, FIELD_TYPES, LEVELS, SECRETS, SYNC_INTERVALS, WEEKDAYS, level_for_wkg, load_config, save_config
@@ -73,6 +74,25 @@ class State:
             raise RuntimeError("Strava is not connected — see Settings")
         await sync(self.db, self.strava, self.cfg)
         await self.publish()
+        # New rides get the coach's feedback and a notification. Its own job, so the sync shows done right away.
+        if self.db.activities_to_notify((datetime.now(timezone.utc) - feedback.WINDOW).strftime("%Y-%m-%dT%H:%M:%SZ")):
+            self.feedback_pending = True  # a running feedback job picks the new rides up before it ends
+            self.start_job("feedback", self.do_feedback())
+
+    async def do_feedback(self) -> None:
+        handled = 0
+        while getattr(self, "feedback_pending", False):
+            self.feedback_pending = False
+            while n := await feedback.after_sync(self.db, self.cfg):  # more than PER_RUN new rides: keep going
+                handled += n
+        if handled:
+            await self.publish()
+
+    async def do_ride_feedback(self, activity_id: int) -> None:
+        a = self.db.activity(activity_id)
+        if a:
+            await feedback.generate(self.db, self.cfg, a)
+            await self.publish()
 
     def snapshot(self) -> dict:
         today = date.today()
@@ -127,10 +147,12 @@ class State:
         today = date.today()
         d = stats.dashboard(self.db.activities(since_local=(today - timedelta(days=400)).isoformat()), today, self.cfg)
         session = today_session(self.db, today)
+        last = next(iter(self.db.activities(limit=1)), None)
         await ha.publish_sensors({
             "ftp": d["ftp"], "wkg": d["wkg"], "ctl": d["ctl"], "atl": d["atl"], "tsb": d["tsb"],
             "week_hours": d["this_week"]["hours"], "week_km": d["this_week"]["km"],
             "today_session": session["title"] if session else "Rest",
+            "last_ride": ((last.get("feedback") or {}).get("headline") or last["name"])[:250] if last else "",
         })
 
     async def do_auto_plan(self, week_start: date) -> None:
@@ -140,7 +162,8 @@ class State:
             await ha.notify(self.cfg.notify_service, "Next week's plan failed", str(e)[:180])
             raise
         await ha.notify(self.cfg.notify_service, "Next week's plan is ready",
-                        f"{coaches.name_of(self.cfg.default_coach)} planned the week of {week_start.strftime('%-d %b')}.")
+                        f"{coaches.name_of(self.cfg.default_coach)} planned the week of {week_start.strftime('%-d %b')}.",
+                        ha.tap(f"/plan/week/{week_start.isoformat()}", "plan"))
 
     async def do_auto_analysis(self) -> None:
         try:
@@ -148,7 +171,8 @@ class State:
         except Exception as e:
             await ha.notify(self.cfg.notify_service, "Weekly analysis failed", str(e)[:180])
             raise
-        await ha.notify(self.cfg.notify_service, "Your weekly analysis is ready", "Open Training → Analysis.")
+        await ha.notify(self.cfg.notify_service, "Your weekly analysis is ready", "Tap to read it.",
+                        ha.tap("/analysis", "analysis"))
 
     def due(self, key: str, now: datetime, at: str, weekday: str | None = None) -> bool:
         """True in the 3 hours after `at` (on `weekday`, if given) until the slot is marked as run with `ran`.
@@ -193,7 +217,7 @@ class State:
                     s = today_session(self.db, now.date())
                     if s:
                         await ha.notify(cfg.notify_service, f"Today: {s['title']}",
-                                        f"{s['duration_min']} min · {s['description'][:180]}")
+                                        f"{s['duration_min']} min · {s['description'][:180]}", ha.tap("/plan", "today"))
                 # A busy job (e.g. a plan you started by hand) leaves the slot open, so the next tick tries again.
                 if cfg.anthropic_api_key and cfg.auto_plan and self.due("auto_plan_ran", now, cfg.auto_plan_time, cfg.auto_plan_day):
                     next_week = stats.week_start(now.date()) + timedelta(days=7)
@@ -218,6 +242,16 @@ def next_run(now: datetime, at: str, weekday: str | None = None) -> datetime | N
         if cand > now and (not weekday or WEEKDAYS[cand.weekday()] == weekday):
             return cand
     return None
+
+
+def planned_by_date(db: DB, acts: list[dict]) -> dict[str, dict]:
+    """Date → the active plan's session that day, for the weeks these rides fall in."""
+    out: dict[str, dict] = {}
+    for ws in {stats.week_start(date.fromisoformat(a["start_date_local"][:10])).isoformat() for a in acts}:
+        for d in (db.active_plan(ws) or {}).get("payload", {}).get("days", []):
+            if d["kind"] != "rest":
+                out[d["date"]] = d
+    return out
 
 
 def today_session(db: DB, today: date) -> dict | None:
@@ -258,6 +292,7 @@ templates.env.filters["dur_label"] = fmt_dur_label
 templates.env.filters["day_label"] = lambda iso: date.fromisoformat(iso).strftime("%a %-d %b")
 templates.env.globals["workout_svg"] = workouts.svg_profile
 templates.env.globals["coaches"] = coaches.COACHES
+templates.env.globals["ride_profiles"] = workouts.ride_profiles
 templates.env.filters["coach_name"] = coaches.name_of
 templates.env.filters["coach_short"] = coaches.short_name_of
 
@@ -275,6 +310,12 @@ def render(request: Request, name: str, **ctx) -> Response:
         "strava_ok": st.strava.configured, "zwift_ok": st.zwift.configured, "ai_ok": bool(st.cfg.anthropic_api_key), **ctx})
 
 
+def render_md(text: str) -> str:
+    """Markdown from the model to HTML. Raw HTML is escaped first: the prompts carry user-controlled text (ride
+    names, chat), so the output is never trusted as markup."""
+    return md.markdown(html_escape(text, quote=False), extensions=["tables"])
+
+
 def back(request: Request, path: str) -> RedirectResponse:
     return RedirectResponse(f"{base(request)}{path}", status_code=303)
 
@@ -284,8 +325,11 @@ async def home(request: Request):
     st: State = request.app.state.st
     today = date.today()
     acts = st.db.activities(since_local=(today - timedelta(days=400)).isoformat())
-    return render(request, "home.html", d=stats.dashboard(acts, today, st.cfg), feed=acts[:30],
-                  session=today_session(st.db, today))
+    d = stats.dashboard(acts, today, st.cfg)
+    feed = acts[:20]
+    return render(request, "home.html", d=d, status=overview.status(st.db, st.cfg, acts, today, d),
+                  latest=feed[0] if feed else None, feed=feed[1:], planned=planned_by_date(st.db, feed),
+                  feedback_running=(st.jobs.get("feedback") or {}).get("running"))
 
 
 @app.get("/activity/{activity_id}")
@@ -298,7 +342,26 @@ async def activity(request: Request, activity_id: int):
     acts = st.db.activities(since_local=(day - timedelta(days=95)).isoformat())
     from .metrics import ZONES, zone_seconds
     zones = list(zip([z for z, _ in ZONES], zone_seconds(a["power_hist"], a["ftp_used"]))) if a.get("power_hist") else []
-    return render(request, "activity.html", a=a, curve90=stats.power_curve(acts, day, 90), zones=zones)
+    fb = a.get("feedback")
+    return render(request, "activity.html", a=a, curve90=stats.power_curve(acts, day, 90), zones=zones,
+                  planned=feedback.plan_day(st.db, day)[1],
+                  fb_html=render_md(fb["detail"]) if fb else None, fb_coach=coaches.name_of(fb["coach"]) if fb else None)
+
+
+@app.post("/activity/{activity_id}/feedback")
+async def activity_feedback(request: Request, activity_id: int):
+    st: State = request.app.state.st
+    if not st.db.activity(activity_id):
+        raise HTTPException(404)
+    if not st.start_job("ride_feedback", st.do_ride_feedback(activity_id)):
+        st.flash = ("error", "The coach is still writing feedback on another ride. Try again in a moment.")
+    return back(request, f"/activity/{activity_id}")
+
+
+@app.get("/plan/week/{week}")
+async def plan_week_view(request: Request, week: str):
+    """A path-only link to a week, for notifications: ingress deep links may drop the query string."""
+    return await plan_view(request, week=week)
 
 
 @app.get("/plan")
@@ -370,7 +433,7 @@ async def zwift_upload(request: Request, plan_id: int, day: str):
 async def analysis_view(request: Request, id: int | None = None):
     st: State = request.app.state.st
     a = st.db.analysis(id)
-    html = md.markdown(a["markdown"], extensions=["tables"]) if a else None
+    html = render_md(a["markdown"]) if a else None
     return render(request, "analysis.html", a=a, html=html, history=st.db.analyses(),
                   default_coach=st.cfg.default_coach)
 
@@ -563,8 +626,8 @@ async def settings_view(request: Request):
     now = datetime.now()
     cfg = st.cfg
     week = stats.week_start(now.date()).isoformat()
-    usage = {"This week": st.db.llm_usage(week), "This month": st.db.llm_usage(now.strftime("%Y-%m-01")),
-             "All time": st.db.llm_usage()}
+    usage = {"This week": st.db.llm_usage(week, llm.cost), "This month": st.db.llm_usage(now.strftime("%Y-%m-01"), llm.cost),
+             "All time": st.db.llm_usage(cost=llm.cost)}
     last_sync = st.db.get("last_sync")
     schedule = {
         "sync": {"last": last_sync["at"][:16].replace("T", " ") + " UTC" if last_sync else None,
@@ -580,7 +643,7 @@ async def settings_view(request: Request):
                      "next": next_run(now, cfg.auto_analysis_time, cfg.auto_analysis_day) if cfg.auto_analysis else None},
     }
     return render(request, "settings.html", cfg=st.cfg, athlete=st.db.get("strava_athlete"),
-                  usage=usage, schedule=schedule, sync_intervals=SYNC_INTERVALS, day_names=DAY_NAMES,
+                  usage=usage, schedule=schedule, last_feedback=(st.db.last_llm_call("ride") or "")[:16].replace("T", " "), sync_intervals=SYNC_INTERVALS, day_names=DAY_NAMES,
                   strava_app=st.strava.has_app, authorize_url=st.strava.authorize_url() if st.strava.has_app else None,
                   redirect_uri=REDIRECT_URI, zwift_profile=st.db.get("zwift_profile"), has_secret={k: bool(getattr(st.cfg, k)) for k in SECRETS})
 
