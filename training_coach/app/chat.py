@@ -3,9 +3,9 @@ from __future__ import annotations
 
 import copy
 import json
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, time, timedelta
 
-from . import coach, coaches
+from . import coach, coaches, memory
 from .config import Config
 from .db import DB
 from .stats import week_start
@@ -32,15 +32,19 @@ CHAT_SCHEMA = {
                          "description": "Replacement days for open_dates that change; empty if the plan stays"},
         "add_notes": {"type": "array", "items": NOTE_SCHEMA},
         "remove_note_ids": {"type": "array", "items": {"type": "integer"}},
+        "remember": {"type": "array", "items": {"type": "string"},
+                     "description": "New lasting facts about the athlete, one short fact per item"},
+        "forget_memory_ids": {"type": "array", "items": {"type": "integer"}},
     },
-    "required": ["reply", "plan_changes", "add_notes", "remove_note_ids"],
+    "required": ["reply", "plan_changes", "add_notes", "remove_note_ids", "remember", "forget_memory_ids"],
     "additionalProperties": False,
 }
 
 ADDENDUM = """
 
 You are now in a chat with the athlete. Each message from them comes with fresh context: the snapshot, this \
-week's active plan, the open dates you may still change and the coach notes you have saved.
+week's active plan, the open dates you may still change, the coach notes you have saved and memory, the lasting \
+facts you and earlier coaches learned about them.
 
 - Answer in your own voice, plainly and briefly: a few short paragraphs at most unless they ask for detail. \
 Use the numbers in the snapshot. If the data can't answer the question, say so.
@@ -54,6 +58,18 @@ event or race (event: put the distance, type and how much it matters in the text
 lasting constraint (other). Resolve dates like "next Friday" from snapshot.today. Don't save what is already \
 in the notes, and don't save things that only change this week's plan.
 - remove_note_ids: notes the athlete says no longer apply.
+- remember: lasting facts about the athlete that will still matter in months and that the profile doesn't hold: \
+background and earlier training, what has or hasn't worked for them, preferences (indoor or outdoor, sessions they \
+like or dread), equipment, recurring constraints such as shift work or family, chronic or recurring issues, and how \
+they respond to load. One short fact per item, in their words where you can, with the context that makes it fair \
+later, e.g. "Said in Oct 2026 that 3 interval days a week wore them down (CTL ~55)". A one-off remark from a bad \
+week isn't a fact. Something with a date range is a note; a yearly pattern is memory, plus a note when it comes up. \
+Don't remember this week's plan or what is already in memory.
+- forget_memory_ids: facts that turned out wrong or no longer hold. When a fact changes, forget the old one and \
+remember the new one.
+- If active_plan.coach isn't you, the athlete switched to you this week and that plan is your predecessor's. \
+Acknowledge the handover the first time. Once you change anything, the rest of the week must pass your rules: if \
+your predecessor's remaining days break them, ease those days too and say why.
 - Their main goal is snapshot.athlete.goals. A smaller event doesn't replace it: save it as an event note and \
 fit it into the progression. If the main goal itself changes, suggest they update Goals on the Profile page.
 - If they ask for an FTP test, plan your own protocol (see FTP testing) on an open date with a rest or easy day \
@@ -113,33 +129,39 @@ def checker(plan: dict | None, dates: list[str], cfg: Config, snapshot: dict, to
 
 
 def chat_coach(db: DB, cfg: Config, today: date) -> coaches.Coach:
-    plan = db.active_plan(week_start(today).isoformat())
-    return coaches.get((plan or {}).get("coach") or cfg.default_coach)
+    return memory.coach_in_charge(db, cfg, datetime.combine(today, time.max))
 
 
 async def respond(db: DB, cfg: Config, snapshot: dict, today: date) -> int:
-    """Answers the latest user message in the chat. Saves notes right away; plan changes as a proposal."""
+    """Answers the latest user message in the chat. Saves notes and memory right away; plan changes as a proposal."""
     ws = week_start(today)
     plan = db.active_plan(ws.isoformat())
-    c = coaches.get((plan or {}).get("coach") or cfg.default_coach)
+    c = chat_coach(db, cfg, today)
     rules = c.rules(cfg.athlete_level, coach.weeks_with_coach(db, c.key, ws))
     dates = open_dates(plan, today, any(r["date"] == today.isoformat() for r in snapshot["recent_rides"]))
     notes = db.active_notes(today.isoformat())
+    facts = db.memories()[-memory.MAX_FACTS:]
 
     history = db.chat(HISTORY + 1)
     messages = []
     for m in history[:-1]:
         text = m["content"]
+        if m["role"] == "assistant" and m["coach"] != c.key:
+            text = f"[Earlier coach: {coaches.name_of(m['coach'])}]\n{text}"
         if m["role"] == "assistant" and m["proposal"]:
             text += f"\n[Proposed changes for {', '.join(d['date'] for d in m['proposal']['days'])}"
             text += ", applied]" if m["applied_plan_id"] else ", not applied]"
         messages.append({"role": m["role"], "content": text})
+    snapshot = memory.for_coach(snapshot, c)
+    if "athlete_history" in snapshot:  # memory goes once, with ids, below
+        snapshot = snapshot | {"athlete_history": {k: v for k, v in snapshot["athlete_history"].items() if k != "memory"}}
     context = {
         "open_dates": dates,
-        "active_plan": {"coach": c.name, "week_focus": plan["payload"]["week_focus"],
+        "active_plan": {"coach": coaches.name_of(plan["coach"]), "week_focus": plan["payload"]["week_focus"],
                         "block_week": plan["payload"].get("block_week"),
                         "days": strip_cues(plan["payload"]["days"])} if plan else None,
         "coach_notes": notes,
+        "memory": [{"id": f["id"], "since": f["created"][:10], "text": f["text"]} for f in facts],
         "snapshot": snapshot,
     }
     messages.append({"role": "user", "content": f"{history[-1]['content']}\n\n```json\n{json.dumps(context, indent=1)}\n```"})
@@ -154,7 +176,14 @@ async def respond(db: DB, cfg: Config, snapshot: dict, today: date) -> int:
     known = {n["id"] for n in notes}
     for note_id in result["remove_note_ids"]:
         if note_id in known:
-            db.delete_note(note_id)
+            db.delete_note(note_id, now)
+    held = {f["id"] for f in facts}
+    for fact_id in result["forget_memory_ids"]:
+        if fact_id in held:
+            db.forget_memory(fact_id, now)
+    remembered = [t for t in dict.fromkeys(t.strip() for t in result["remember"]) if t and t not in {f["text"] for f in facts}]
+    for text in remembered:
+        db.add_memory(now, c.key, text)
     saved = []
     for n in result["add_notes"]:
         try:
@@ -165,7 +194,7 @@ async def respond(db: DB, cfg: Config, snapshot: dict, today: date) -> int:
         db.add_note(now, n["kind"], start.isoformat(), end.isoformat(), n["text"].strip())
         saved.append(f"{n['text'].strip()} ({_span(start, end)})")
     proposal = {"plan_id": plan["id"], "days": result["plan_changes"]} if plan and result["plan_changes"] else None
-    return db.add_chat(now, "assistant", c.key, result["reply"], proposal, warnings if proposal else [], saved)
+    return db.add_chat(now, "assistant", c.key, result["reply"], proposal, warnings if proposal else [], saved, remembered)
 
 
 def _span(start: date, end: date) -> str:

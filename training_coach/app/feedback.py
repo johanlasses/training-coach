@@ -11,7 +11,7 @@ import math
 from datetime import date, datetime, timedelta, timezone
 from statistics import StatisticsError, correlation, median
 
-from . import coaches, ha, health, llm, metrics, overview, stats, workouts
+from . import coaches, ha, health, llm, memory, metrics, overview, stats, workouts
 from .coach import HEALTH_RULES, compliance
 from .config import Config
 from .db import DB
@@ -70,6 +70,10 @@ there's too little earlier power data to call anything a best.
 - The planner reads health with this rule. Apply the same rule when you talk about what comes next, and don't \
 change the next session beyond what it says:
 {health_rules}
+- planned_session.planned_by isn't you when the athlete switched to you this week: judge the ride against it as \
+written and don't critique its design here.
+- athlete_history is background: who coached them before you, earlier injuries and events (past_notes) and \
+lasting facts (memory). Use it when it explains this ride, e.g. an old injury or a known preference; don't recite it.
 - English, in your own coaching voice:
 
 {philosophy}"""
@@ -173,7 +177,8 @@ def context(db: DB, cfg: Config, a: dict) -> tuple[dict, coaches.Coach]:
     acts = [x for x in db.activities(since_local=(day - timedelta(days=400)).isoformat())
             if x["start_date_local"] <= a["start_date_local"]]
     plan, planned = plan_day(db, day, a["name"] or "")
-    c = coaches.get(plan["coach"] if plan and plan.get("coach") else cfg.default_coach)
+    at = datetime.fromisoformat(a["start_date_local"][:19])
+    c = memory.coach_in_charge(db, cfg, at)
     d = stats.dashboard(acts, day, cfg)
     zones = metrics.zone_seconds(a["power_hist"], a["ftp_used"]) if a.get("power_hist") and a.get("ftp_used") else []
     ride = {
@@ -210,7 +215,7 @@ def context(db: DB, cfg: Config, a: dict) -> tuple[dict, coaches.Coach]:
         "ride": ride,
         "planned_session": {k: planned.get(k, "none" if k == "test_protocol" else None) for k in (
             "date", "kind", "title", "description", "duration_min", "intensity", "target_tss", "test_protocol")}
-        if planned else None,
+        | {"planned_by": coaches.name_of(plan["coach"])} if planned else None,
         **seg,
         **({"new_bests": bests} if bests is not None else {"history_thin": True}),
         "week_so_far": {"week_focus": plan["payload"]["week_focus"] if plan else None, "days": week,
@@ -227,6 +232,8 @@ def context(db: DB, cfg: Config, a: dict) -> tuple[dict, coaches.Coach]:
                     "w_per_kg": d["wkg"]},
         "coach_notes": [{k: n[k] for k in ("kind", "start", "end", "text")} for n in db.active_notes(day.isoformat())],
     }
+    h = memory.history(db, cfg, at)
+    ctx["athlete_history"] = {k: h[k] for k in ("coaches", "past_notes", "memory")}
     if health.entities(cfg):
         ctx["health"] = health.summary(db, day)
     return ctx, c

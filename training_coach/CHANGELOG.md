@@ -1,5 +1,25 @@
 # Changelog
 
+## 0.6.0 (2026-10-19)
+
+- **The Coach chat looks like a messaging app.** It opens on the latest message, only the messages scroll, and the
+  message box stays at the bottom. Messages are grouped by sender with the coach's initials and the time, with day
+  dividers. The box grows as you type and no longer makes the iPhone zoom in. On the phone, your coach notes sit
+  under **Notes** at the top. While the coach is typing, the page reloads once when the reply is in, and keeps
+  anything you've started writing.
+- **The coach remembers you.** Every plan, analysis, chat reply and ride verdict now knows who coached you before
+  and for how long, what you changed on Profile (goals, weight, FTP override, availability, coach) and when, earlier
+  injuries, illnesses, trips and events, your FTP tests, and lasting facts the coach picked up in the chat.
+  **Profile → What the coach remembers** lists those facts, and you can remove any that are wrong.
+  **Profile → History** shows the rest.
+- **Switching coach takes effect right away.** Pick a new coach on Profile and it takes over the chat and ride
+  feedback immediately, even mid-week. It knows it's taking over, builds on what your previous coach did and phases
+  in its own approach instead of starting over. If it changes this week's plan, the rest of the week has to follow
+  its rules.
+- **The weekly analysis reads the previous one** and says what changed since, or that it's too early to tell.
+- Deleted coach notes are kept in your history instead of being erased. After updating, don't go back to 0.5.0:
+  it would bring deleted notes back.
+
 ## 0.5.0 (2026-10-16)
 
 Built for the Home Assistant iPhone app.

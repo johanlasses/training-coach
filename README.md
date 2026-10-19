@@ -23,7 +23,12 @@ Setup steps are in [training_coach/DOCS.md](training_coach/DOCS.md).
   weekly TSS vs. ramp limits and workout step totals. A failing plan is retried once with the errors.
 - **Analysis** (`app/analysis.py`): a Markdown report built from a JSON snapshot of the athlete (`app/stats.py`).
 - **Chat** (`app/chat.py`): a structured reply with optional plan changes (merged into the active plan, validated, and
-  applied by the user as a new plan version) and coach notes (`coach_notes` table). The notes feed every later snapshot.
+  applied by the user as a new plan version), coach notes (`coach_notes` table) and memory facts (`athlete_memory`).
+  The notes feed every later snapshot.
+- **Memory** (`app/memory.py`): `athlete_history` in every snapshot and in the ride feedback context. It holds the coach
+  timeline from the active plans, Profile changes (`athlete_log`, written by `apply_form`), notes that ended or were
+  removed (notes are soft-deleted), FTP results and the memory facts. `coach_in_charge` decides who answers in chat and
+  writes ride feedback: the week's plan's coach, unless a coach switch on Profile is newer than that plan.
 - **FTP tests** (`app/ftptest.py`): plan days carry `test_protocol`, and the estimate comes from the test ride's best efforts.
 - **Apple Health** (`app/health.py`): reads the HA iOS app's HealthKit sensors through the Supervisor API, stores daily
   values (`health_daily`), and adds 7- and 28-day trends to the snapshot.

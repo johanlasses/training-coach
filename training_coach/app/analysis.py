@@ -2,16 +2,16 @@
 from __future__ import annotations
 
 import json
-from datetime import datetime
+from datetime import datetime, timedelta
 
-from . import coaches, llm
+from . import coaches, llm, memory
 from .config import Config
 from .db import DB
 
 SYSTEM = """You are a sharp, honest cycling coach and sports scientist analysing one amateur road and \
 gravel cyclist's training (Zwift indoors, road/gravel outside, Mälardalen, Sweden). You get a JSON snapshot: load (CTL/ATL/TSB), 12 weeks of volume, power curves \
 (90 d and 365 d best efforts), eFTP trend, zone distribution, Pw:HR decoupling, recent rides, season \
-and daylight, coach_notes (absences, events, injuries the athlete mentioned) and, when present, health (Apple \
+and daylight, coach_notes (absences, events, injuries the athlete mentioned), athlete_history and, when present, health (Apple \
 Health). In health, resting HR, HRV (Apple's SDNN, noisy) and sleep are readiness signals: read them only as \
 the 7-day vs baseline trends, and say when there are few days of data. Weight is for W/kg. Apple's VO2 max comes \
 from walking and running and says little about cycling fitness, so don't build conclusions on it. ftp_tests lists \
@@ -27,6 +27,15 @@ curves to find strengths and limiters (e.g. strong 5 min vs. weak 20 min suggest
 work), judge intensity distribution, consistency, ramp rate, fatigue and monotony, aerobic durability \
 from decoupling. Be direct — if training is unstructured or too much Z3, say so. Point out when data \
 is thin (e.g. eFTP based on no real maximal efforts, HR-only rides) instead of over-interpreting.
+
+athlete_history is the longer story: coaches (who coached them and for how many planned weeks, which counts \
+plans made, not followed), changes (profile edits such as goals, weight, FTP override, availability and coach \
+switches, with dates), past_notes (earlier injuries, illnesses, absences and events; cancelled ones never \
+happened), ftp_results and memory (lasting facts learned in chat). A change may explain a trend when its date \
+lines up with the change in weeks or ftp_trend: call it a likely reason, not proof, and don't judge a coach's \
+approach from a run under ~6 weeks. previous_analysis, when present, is an earlier analysis (maybe by another \
+coach), days_since days ago. Judge whether its focus was followed only from recent_rides dated after it; under ~2 \
+weeks or fewer than ~4 rides since, say it's too early to judge. Don't repeat it.
 
 Write in English, Markdown, with exactly these sections:
 ## Current form
@@ -45,7 +54,11 @@ Analyse through this coaching philosophy and write in its voice:
 
 async def run_analysis(db: DB, cfg: Config, snapshot: dict, kind: str, coach_key: str | None = None) -> int:
     c = coaches.get(coach_key or cfg.default_coach)
+    prev = db.analysis_before((datetime.now() - timedelta(days=6)).isoformat(timespec="seconds"))  # not a minutes-old run
+    ctx = memory.for_coach(snapshot, c) | ({"previous_analysis": {
+        "date": prev["created_at"][:10], "days_since": (datetime.now() - datetime.fromisoformat(prev["created_at"])).days,
+        "coach": coaches.name_of(prev["coach"]), "markdown": prev["markdown"][:4000]}} if prev else {})
     msg = await llm.run(cfg.anthropic_api_key, SYSTEM.format(philosophy=c.philosophy), [{"role": "user", "content":
-                        f"```json\n{json.dumps(snapshot, indent=1)}\n```"}], effort="high",
+                        f"```json\n{json.dumps(ctx, indent=1)}\n```"}], effort="high",
                         db=db, purpose="analysis")
     return db.save_analysis(datetime.now().isoformat(timespec="seconds"), kind, llm.MODELS["analysis"], llm.text_of(msg), c.key)

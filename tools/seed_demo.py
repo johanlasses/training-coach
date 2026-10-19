@@ -84,8 +84,20 @@ for i in range(7):
     else:
         days.append({"date": d, "kind": "rest", "title": "Rest", "description": "Off the bike.", "duration_min": 0,
                      "intensity": "recovery", "target_tss": 0, "bike": "none", "terrain": "", "steps": []})
+# Earlier weeks: two with Carmichael, then the athlete switched to Next Level
+for n, key in ((3, "carmichael"), (2, "carmichael"), (1, "nextlevel")):
+    w = ws - timedelta(weeks=n)
+    db.save_plan(w.isoformat(), f"{w - timedelta(days=1)}T20:00:00", "demo",
+                 {"week_focus": "Demo week", "rationale": "", "block_week": 4 - n,
+                  "days": [dict(d, date=(w + timedelta(days=i)).isoformat()) for i, d in enumerate(days)]}, [], key)
+switched = f"{ws - timedelta(weeks=1, days=2)}T18:30:00"
+db.log(switched, "coach", "Coach: Carmichael (Time-Crunched) → Next Level", {"from": "carmichael", "to": "nextlevel"})
+db.log(f"{ws - timedelta(weeks=5)}T21:00:00", "profile", "Goals: none → “Ride a 160 km gravel event in June”",
+       {"field": "goals", "old": "", "new": "Ride a 160 km gravel event in June"})
+db.log(f"{ws - timedelta(weeks=2)}T07:10:00", "profile", "Weight: 78 kg → 76.5 kg", {"field": "weight_kg", "old": 78.0, "new": 76.5})
 plan_id = db.save_plan(ws.isoformat(), datetime.now().isoformat(timespec="seconds"), "demo",
-                       {"week_focus": "Build aerobic base", "rationale": "Demo plan.", "days": days, "block_week": 2}, [])
+                       {"week_focus": "Build aerobic base", "rationale": "Demo plan.", "days": days, "block_week": 2}, [],
+                       "nextlevel")
 
 # Today's ride: the planned workout, with the last rep fading, and the coach's feedback on it
 ftp = db.activities(limit=1)[0]["ftp_used"]
@@ -117,8 +129,30 @@ db.update_activity(aid, streams_fetched=1, notified=1, feedback={
     **process_streams({"time": list(range(n)), "watts": watts, "heartrate": [130 + w * 0.08 for w in watts]}))
 recompute(db, cfg)
 
-# Coach chat with a pending proposal, coach notes, Apple Health values and Claude usage
+# Coach chat: an earlier talk with Carmichael, the switch, a pending proposal; notes, memory, Apple Health, usage
 now = datetime.now().isoformat(timespec="seconds")
+for ago, at, role, key, text in [
+    (12, "19:02", "user", "carmichael", "Can I swap Thursday's intervals for a club ride? It's usually fast."),
+    (12, "19:03", "assistant", "carmichael", "Yes, if you treat it as the session: sit in for the first hour, then go "
+     "hard on the climbs. Skip Friday's openers."),
+    (12, "19:10", "user", "carmichael", "Deal. Three interval days a week is a lot with work though."),
+    (9, "08:15", "user", "nextlevel", "I switched to you because the interval weeks wore me down. Where do we start?"),
+    (9, "08:16", "assistant", "nextlevel", "Good call to say it. You come off two dense weeks, so we keep your fitness and "
+     "drop to two quality days: one sweet spot, one long ride. Same weekly hours, less intensity."),
+    (1, "20:40", "user", "nextlevel", "Legs felt flat on today's endurance ride."),
+    (1, "20:41", "assistant", "nextlevel", "Your form is −14, which fits a build week. Sleep was short two nights in a "
+     "row too. Keep tomorrow's sweet spot, but start at the low end of the range."),
+    (1, "20:43", "user", "nextlevel", "OK. And I'm on nights at work in March, worth knowing."),
+    (1, "20:44", "assistant", "nextlevel", "Noted. I'll plan shorter weekday sessions then."),
+]:
+    db.add_chat(f"{today - timedelta(days=ago)}T{at}:00", role, key, text,
+                remembered=["Works night shifts every March, so short weekday sessions then"] if text.startswith("Noted") else ())
+for created, key, text in [(f"{today - timedelta(days=12)}T19:11:00", "carmichael", "Rides a fast club ride on Thursdays"),
+                           (f"{today - timedelta(days=9)}T08:16:00", "nextlevel", "Three interval days a week wore them down"),
+                           (f"{today - timedelta(days=1)}T20:44:00", "nextlevel", "Works night shifts every March, so short weekday sessions then")]:
+    db.add_memory(created, key, text)
+db.add_note(now, "injury", (today - timedelta(days=40)).isoformat(), (today - timedelta(days=33)).isoformat(),
+            "Sore left knee after a long climbing day")
 later = [d for d in days if d["date"] >= today.isoformat()]
 db.add_chat(now, "user", "nextlevel", "I'm away on a work trip for two days later this week. Also, there's an 80 km gravel "
             "race in three weeks I'd like to ride well, though my main goal stays the same.")

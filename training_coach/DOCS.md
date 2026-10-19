@@ -50,8 +50,11 @@ the last 48 hours get one, so the first sync doesn't flood your phone. **Ask aga
 
 ## Coach chat
 
-The **Coach** tab is a chat with the coach of this week's active plan. Ask about your training, or tell it what's
-coming up: "I'm away Thursday to Saturday", "there's an 80 km gravel race on 8 November", "add an FTP test".
+The **Coach** tab is a chat with your coach: the coach of this week's active plan, or the one you switched to on
+**Profile** since that plan was made. A new coach takes over right away, even mid-week, and sees the earlier
+conversation. Ask about your training, or tell it what's coming up: "I'm away Thursday to Saturday", "there's an
+80 km gravel race on 8 November", "add an FTP test". The chat opens on the latest message. On a computer Enter sends
+and Shift+Enter starts a new line; on the phone, tap **Send**.
 
 - **Plan changes** come as a proposal listing each day before and after. Nothing changes until you press
   **Apply to plan**. That saves a new version of the week's plan and makes it the active one. The change is checked
@@ -59,7 +62,25 @@ coming up: "I'm away Thursday to Saturday", "there's an 80 km gravel race on 8 N
 - **Coach notes** are things that matter beyond this week: trips, secondary events, injuries. The coach saves them on
   its own. They're listed on the Coach and Profile pages, can be deleted there, and every later plan and analysis
   takes them into account until they end. Your main goal stays the one on **Profile**.
-- Each message sends the last 20 messages plus your training data. **Clear chat** starts over and keeps the notes.
+- Each message sends the last 20 messages plus your training data. **Clear** starts over and keeps the notes and
+  the memory.
+
+## What the coach remembers
+
+The coach keeps a history of you, so a new coach knows where you come from. Every plan, analysis, chat reply and ride
+verdict gets:
+
+- **Who coached you** and for how many weeks, taken from the active plans and coach switches on **Profile**.
+- **What changed on Profile** and when: goals, coach, level, sessions per week, weight, FTP override, threshold HR and
+  availability.
+- **Earlier notes** from the last year: past injuries, illnesses, trips and events, also the ones you deleted.
+- **Your FTP test results.**
+- **Lasting facts** the coach picked up in the chat, such as your background, what works for you, what doesn't, and
+  constraints like shift work.
+
+After a switch, the new coach builds on the previous coach's training instead of starting over. The weekly analysis
+also reads the previous analysis and says what changed since. **Profile → What the coach remembers** lists the facts,
+and you can remove any that are wrong. **Profile → History** shows the rest.
 
 ## FTP tests
 

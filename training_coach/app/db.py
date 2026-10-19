@@ -80,7 +80,8 @@ CREATE TABLE IF NOT EXISTS chat_messages (
     proposal TEXT,            -- JSON {plan_id, days: [...]} when the coach proposed plan changes
     warnings TEXT,            -- JSON list, checks the proposal still fails
     notes TEXT,               -- JSON list of note texts saved with this reply
-    applied_plan_id INTEGER
+    applied_plan_id INTEGER,
+    remembered TEXT           -- JSON list of memory facts saved with this reply
 );
 CREATE TABLE IF NOT EXISTS coach_notes (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -88,7 +89,22 @@ CREATE TABLE IF NOT EXISTS coach_notes (
     kind TEXT,                -- absence | event | injury | other
     start TEXT,               -- YYYY-MM-DD
     end TEXT,                 -- YYYY-MM-DD, last day it matters
-    text TEXT
+    text TEXT,
+    removed TEXT              -- local ISO when deleted; kept so later coaches still see it
+);
+CREATE TABLE IF NOT EXISTS athlete_log (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    ts TEXT,                  -- local ISO
+    kind TEXT,                -- coach | profile
+    text TEXT,                -- readable, e.g. "Weight: 78 → 76.5 kg"
+    data TEXT                 -- JSON {field, old, new} or {from, to} for coach
+);
+CREATE TABLE IF NOT EXISTS athlete_memory (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    created TEXT,
+    coach TEXT,               -- who learned it
+    text TEXT,
+    removed TEXT
 );
 CREATE TABLE IF NOT EXISTS health_daily (
     date TEXT,
@@ -121,6 +137,9 @@ class DB:
                 self.conn.execute(f"ALTER TABLE activities ADD COLUMN {col} {decl}")
                 if col == "notified":  # rides from before the upgrade were seen already: no pushes for them
                     self.conn.execute("UPDATE activities SET notified=1")
+        for table, col in (("coach_notes", "removed"), ("chat_messages", "remembered")):  # added in 0.6.0
+            if col not in {r["name"] for r in self.conn.execute(f"PRAGMA table_info({table})")}:
+                self.conn.execute(f"ALTER TABLE {table} ADD COLUMN {col} TEXT")
         self.conn.commit()
 
     # --- kv -------------------------------------------------------------
@@ -253,6 +272,11 @@ class DB:
             r = self.conn.execute("SELECT * FROM analyses WHERE id=?", (analysis_id,)).fetchone()
         return dict(r) if r else None
 
+    def analysis_before(self, ts: str) -> dict | None:
+        r = self.conn.execute("SELECT * FROM analyses WHERE created_at <= ? ORDER BY created_at DESC, id DESC LIMIT 1",
+                              (ts,)).fetchone()
+        return dict(r) if r else None
+
     # --- Claude usage -----------------------------------------------------
     def log_llm(self, ts: str, purpose: str, msg) -> None:
         u = msg.usage
@@ -284,11 +308,12 @@ class DB:
 
     # --- chat and coach notes ----------------------------------------------
     def add_chat(self, ts: str, role: str, coach: str, content: str, proposal: dict | None = None,
-                 warnings: list[str] = (), notes: list[str] = ()) -> int:
+                 warnings: list[str] = (), notes: list[str] = (), remembered: list[str] = ()) -> int:
         cur = self.conn.execute(
-            "INSERT INTO chat_messages(ts, role, coach, content, proposal, warnings, notes) VALUES(?,?,?,?,?,?,?)",
+            "INSERT INTO chat_messages(ts, role, coach, content, proposal, warnings, notes, remembered) "
+            "VALUES(?,?,?,?,?,?,?,?)",
             (ts, role, coach, content, json.dumps(proposal) if proposal else None, json.dumps(list(warnings)),
-             json.dumps(list(notes))))
+             json.dumps(list(notes)), json.dumps(list(remembered))))
         self.conn.commit()
         return cur.lastrowid
 
@@ -315,14 +340,54 @@ class DB:
         self.conn.commit()
         return cur.lastrowid
 
-    def delete_note(self, note_id: int) -> None:
-        self.conn.execute("DELETE FROM coach_notes WHERE id=?", (note_id,))
+    def delete_note(self, note_id: int, ts: str) -> None:
+        """Takes a note out of play but keeps it for the athlete's history."""
+        self.conn.execute("UPDATE coach_notes SET removed=? WHERE id=? AND removed IS NULL", (ts, note_id))
         self.conn.commit()
 
     def active_notes(self, today: str) -> list[dict]:
-        """Notes that still matter: their end date is today or later."""
-        rows = self.conn.execute("SELECT * FROM coach_notes WHERE end >= ? ORDER BY start, id", (today,)).fetchall()
+        """Notes that still matter: their end date is today or later, and nobody removed them."""
+        rows = self.conn.execute("SELECT * FROM coach_notes WHERE end >= ? AND removed IS NULL ORDER BY start, id",
+                                 (today,)).fetchall()
         return [dict(r) for r in rows]
+
+    def past_notes(self, today: str, since: str, limit: int = 20) -> list[dict]:
+        """Notes that ended or were removed since `since`, latest first."""
+        rows = self.conn.execute(
+            "SELECT * FROM coach_notes WHERE (end < ? AND end >= ?) OR removed >= ? ORDER BY end DESC, id DESC LIMIT ?",
+            (today, since, since, limit)).fetchall()
+        return [dict(r) for r in rows]
+
+    # --- athlete log and memory ---------------------------------------------
+    def log(self, ts: str, kind: str, text: str, data: dict | None = None) -> int:
+        cur = self.conn.execute("INSERT INTO athlete_log(ts, kind, text, data) VALUES(?,?,?,?)",
+                                (ts, kind, text, json.dumps(data or {})))
+        self.conn.commit()
+        return cur.lastrowid
+
+    def log_entries(self, since: str = "", limit: int = 40) -> list[dict]:
+        """Latest first."""
+        rows = self.conn.execute("SELECT * FROM athlete_log WHERE ts >= ? ORDER BY ts DESC, id DESC LIMIT ?",
+                                 (since, limit)).fetchall()
+        return [_log(r) for r in rows]
+
+    def last_log(self, kind: str, before: str) -> dict | None:
+        r = self.conn.execute("SELECT * FROM athlete_log WHERE kind=? AND ts <= ? ORDER BY ts DESC, id DESC LIMIT 1",
+                              (kind, before)).fetchone()
+        return _log(r) if r else None
+
+    def add_memory(self, created: str, coach: str, text: str) -> int:
+        cur = self.conn.execute("INSERT INTO athlete_memory(created, coach, text) VALUES(?,?,?)", (created, coach, text))
+        self.conn.commit()
+        return cur.lastrowid
+
+    def forget_memory(self, memory_id: int, ts: str) -> None:
+        self.conn.execute("UPDATE athlete_memory SET removed=? WHERE id=? AND removed IS NULL", (ts, memory_id))
+        self.conn.commit()
+
+    def memories(self) -> list[dict]:
+        """Facts still held, oldest first."""
+        return [dict(r) for r in self.conn.execute("SELECT * FROM athlete_memory WHERE removed IS NULL ORDER BY id")]
 
     # --- health -------------------------------------------------------------
     def set_health(self, day: str, metric: str, value: float, unit: str, keep_first: bool = False) -> None:
@@ -342,6 +407,13 @@ def _chat(r: sqlite3.Row) -> dict:
     d["proposal"] = json.loads(d["proposal"]) if d["proposal"] else None
     d["warnings"] = json.loads(d["warnings"] or "[]")
     d["notes"] = json.loads(d["notes"] or "[]")
+    d["remembered"] = json.loads(d["remembered"] or "[]")
+    return d
+
+
+def _log(r: sqlite3.Row) -> dict:
+    d = dict(r)
+    d["data"] = json.loads(d["data"] or "{}")
     return d
 
 

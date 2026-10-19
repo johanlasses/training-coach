@@ -21,7 +21,8 @@
 
 <section class="card">
   <h2>Default coach</h2>
-  <p class="caption">Preselected on Plan and Analysis. You can pick another coach there for any run.</p>
+  <p class="caption">Your coach. Switching hands the chat and ride feedback to the new coach right away; this week's
+    plan stays until you generate a new one. On Plan and Analysis you can still run any coach.</p>
   {% for c in coaches.values() %}
   <label class="choice"><input type="radio" name="default_coach" value="{{ c.key }}" {{ 'checked' if c.key == cfg.default_coach }}>
     <span>{{ c.name }}<small>{{ c.summary }}</small></span></label>
@@ -86,6 +87,38 @@
   <h2>Coach notes</h2>
   <p class="caption">Saved from the <a href="{{ base }}/coach">Coach</a> chat. Every plan and analysis takes them into account until they end.</p>
   {{ note_list(notes, 'profile') }}
+</section>
+<section class="card notes-card">
+  <h2>What the coach remembers</h2>
+  <p class="caption">Lasting facts your coaches picked up in the chat. Every coach reads them, a new one too. Remove
+    anything that's wrong, or correct it in the <a href="{{ base }}/coach">Coach</a> chat.</p>
+  {% for f in history.memory %}
+  <div class="note">
+    <div>{{ f.text }}<br><span class="facts">Since {{ f.since | day_label }}</span></div>
+    <form method="post" action="{{ base }}/memory/{{ f.id }}/delete" onsubmit="return confirm('Forget this?')">
+      <button class="secondary" aria-label="Forget">✕</button></form>
+  </div>
+  {% else %}<p class="muted flush">Nothing yet. Tell the coach about your background, what works for you and what doesn't.</p>{% endfor %}
+</section>
+<section class="card notes-card">
+  <details class="history-log">
+    <summary><h2>History</h2><span class="caption">What every coach knows about your past: who coached you, profile
+      changes and earlier notes.</span></summary>
+    <h3>Coaches</h3>
+    {% for r in history.coaches | reverse %}
+    <div class="note"><div>{{ r.coach }}<br><span class="facts">{{ r.from | day_label }} → {{ r.to | day_label if r.to else 'now' }}
+      {%- if r.weeks_planned %} · {{ r.weeks_planned }} planned week{{ 's' if r.weeks_planned != 1 }}{% endif %}</span></div></div>
+    {% else %}<p class="muted flush">No plans yet.</p>{% endfor %}
+    <h3>Changes</h3>
+    {% for e in history.changes %}
+    <div class="note"><div>{{ e.change }}<br><span class="facts">{{ e.date | day_label }}</span></div></div>
+    {% else %}<p class="muted flush">Nothing changed on this page in the last year.</p>{% endfor %}
+    <h3>Earlier notes</h3>
+    {% for n in history.past_notes %}
+    <div class="note"><div><span class="facts">{{ n.kind | capitalize }} · {{ n.start | day_label }}{% if n.end != n.start %} → {{ n.end | day_label }}{% endif %}
+      {%- if n.removed %} · removed {{ n.removed | day_label }}{% endif %}</span><br>{{ n.text }}</div></div>
+    {% else %}<p class="muted flush">None in the last year.</p>{% endfor %}
+  </details>
 </section>
 </div>
 {% endblock %}

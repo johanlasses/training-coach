@@ -5,7 +5,7 @@ import json
 import logging
 from datetime import date, datetime, timedelta
 
-from . import coaches, ftptest, llm, workouts
+from . import coaches, ftptest, llm, memory, workouts
 from .config import Config
 from .db import DB
 
@@ -116,6 +116,24 @@ same number of rides. Injury notes override the progression: back off until they
 with fever or symptoms below the neck; after the note ends, at least 2-3 easy days before any hard session, \
 and after a fever roughly as many easy days as days sick. A note asking for a test counts as the athlete asking.
 {health_rules}
+- snapshot.athlete_history is the longer story: coaches (who coached them, from when, for how many planned \
+weeks; the run with "you": true is you, and a later run means you are taking over), changes (profile edits such as \
+goals, FTP override, weight, availability and coach switches, with dates), past_notes (earlier injuries, illnesses, \
+absences and events, with the day they really ended; cancelled ones never happened), ftp_results and memory \
+(lasting facts you or earlier coaches learned in chat).
+- Taking over from another coach (their run ended in the last few weeks): build on that training instead of starting \
+over. In your first week keep weekly TSS within about ±10% of the last 2-3 weeks' average, bring in your own \
+structure over 1-2 weeks with at most one more hard session than they planned, and mention the handover in \
+week_focus. If they switched because they felt worn down or stale (chat, memory), or TSB has been below -20 for a \
+week or more, make the first week a hold week: same or lower TSS and fewer hard sessions than before. After an FTP \
+change (ftp_results, changes), judge continuity by hours and kJ as well as TSS, since TSS moves with the FTP.
+- An illness note that ended in the last 3 days (past_notes) still counts for the illness rule. An injury that ended \
+under ~6 weeks ago: bring back the load that caused it (long climbs, low-cadence torque, long efforts in the drops) \
+over 2-3 weeks, the longest ride growing ~10-20% a week. Older healed injuries are background unless a note or \
+memory says it came back.
+- Weigh memory, don't obey it. If a session type they dislike is still needed for the goal, pick the most tolerable \
+format (e.g. 30/15s instead of 4-5 min VO2 reps) rather than dropping it, and revisit a "didn't work" fact older than \
+~3 months or after a clear fitness change.
 - Choose outdoor rides from the season and daylight: weekend outdoor rides when the season allows, weekday \
 outdoor rides only with daylight after work (sunset well after 18:00). Otherwise use Zwift. The athlete swaps \
 an outdoor ride for Zwift themselves if the weather turns, so give outdoor days a Zwift-friendly purpose.
@@ -185,10 +203,13 @@ def hard_errors(days: list[dict], done_rides: list[dict], rules: dict, recovery:
         errors.append(f"{n} hard days this week (incl. rides already done); "
                       f"at most {max_hard}{' in a recovery week' if recovery else ''}")
     day, end, run = min(date.fromisoformat(k) for k in hard), date.fromisoformat(days[-1]["date"]), 0
-    while day <= end:
+    reported = False
+    while day <= end:  # a run of rides already done is history: only report one that reaches a planned day
         run = run + 1 if hard.get(day.isoformat()) else 0
-        if run == max_run + 1:
+        reported = reported and run > 0
+        if run > max_run and day.isoformat() >= days[0]["date"] and not reported:
             errors.append(f"{run} hard days in a row ending {day.isoformat()}; at most {max_run}")
+            reported = True
         day += timedelta(days=1)
     return errors
 
@@ -320,7 +341,7 @@ async def generate_plan(db: DB, cfg: Config, snapshot: dict, week_start: date, t
         "coach": c.name,
         "weeks_with_this_coach": weeks,
         "already_done_this_week": done,
-        "snapshot": snapshot,
+        "snapshot": memory.for_coach(snapshot, c),
     }
     messages = [{"role": "user", "content": (
         f"Plan these days: {', '.join(dates)}. This is week {bw} of the 4-week block "

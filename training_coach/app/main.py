@@ -12,11 +12,11 @@ from pathlib import Path
 import httpx
 import markdown as md
 from fastapi import FastAPI, HTTPException, Query, Request
-from fastapi.responses import RedirectResponse, Response
+from fastapi.responses import JSONResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
-from . import analysis, chat, coaches, feedback, ftptest, ha, health, overview, stats, workouts
+from . import analysis, chat, coaches, feedback, ftptest, ha, health, memory, overview, stats, workouts
 from . import coach as coach_mod
 from . import llm
 from .config import DATA_DIR, FIELD_TYPES, LEVELS, SECRETS, SYNC_INTERVALS, WEEKDAYS, level_for_wkg, load_config, save_config
@@ -102,6 +102,7 @@ class State:
                                for n in self.db.active_notes(today.isoformat())]
         if health.entities(self.cfg):
             snap["health"] = health.summary(self.db, today)
+        snap["athlete_history"] = memory.history(self.db, self.cfg, datetime.now())
         return snap
 
     def recent_tests(self, today: date, weeks: int = 12) -> list[dict]:
@@ -473,7 +474,7 @@ async def plan_activate(request: Request, plan_id: int):
 async def coach_view(request: Request):
     st: State = request.app.state.st
     today = date.today()
-    messages = st.db.chat()
+    messages = st.db.chat(100)
     active = st.db.active_plan(stats.week_start(today).isoformat())
     for m in messages:  # old → new title per changed day, for the proposal diff
         if m["proposal"]:
@@ -482,7 +483,15 @@ async def coach_view(request: Request):
             m["live"] = (not m["applied_plan_id"] and active and active["id"] == m["proposal"]["plan_id"]
                          and all(d["date"] >= today.isoformat() for d in m["proposal"]["days"]))
     return render(request, "coach.html", messages=messages, coach=chat.chat_coach(st.db, st.cfg, today),
-                  notes=st.db.active_notes(today.isoformat()), has_plan=bool(active))
+                  notes=st.db.active_notes(today.isoformat()), has_plan=bool(active),
+                  plan_coach=active["coach"] if active else None, today=today.isoformat(),
+                  yesterday=(today - timedelta(days=1)).isoformat())
+
+
+@app.get("/coach/status")
+async def coach_status(request: Request):
+    """Polled by the chat page while the coach is typing, so it reloads once when the reply is in."""
+    return JSONResponse({"running": bool((request.app.state.st.jobs.get("chat") or {}).get("running"))})
 
 
 @app.post("/coach")
@@ -494,7 +503,7 @@ async def coach_send(request: Request):
     elif text:
         st.db.add_chat(datetime.now().isoformat(timespec="seconds"), "user", chat.chat_coach(st.db, st.cfg, date.today()).key, text)
         st.start_job("chat", st.do_chat())
-    return back(request, "/coach#end")
+    return back(request, "/coach")
 
 
 @app.post("/coach/{msg_id}/apply")
@@ -507,22 +516,29 @@ async def coach_apply(request: Request, msg_id: int):
     st.flash = ("ok" if plan_id else "error", text)
     if plan_id:
         st.start_job("publish", st.publish())  # MQTT round-trip: don't hold the redirect
-    return back(request, "/coach#end")
+    return back(request, "/coach")
 
 
 @app.post("/coach/clear")
 async def coach_clear(request: Request):
     st: State = request.app.state.st
     st.db.clear_chat()
-    st.flash = ("ok", "Conversation cleared. Coach notes are kept.")
+    st.flash = ("ok", "Conversation cleared. Coach notes and memory are kept.")
     return back(request, "/coach")
 
 
 @app.post("/notes/{note_id}/delete")
 async def note_delete(request: Request, note_id: int):
     st: State = request.app.state.st
-    st.db.delete_note(note_id)
+    st.db.delete_note(note_id, datetime.now().isoformat(timespec="seconds"))
     return back(request, "/profile" if (await request.form()).get("from") == "profile" else "/coach")
+
+
+@app.post("/memory/{memory_id}/delete")
+async def memory_delete(request: Request, memory_id: int):
+    st: State = request.app.state.st
+    st.db.forget_memory(memory_id, datetime.now().isoformat(timespec="seconds"))
+    return back(request, "/profile")
 
 
 @app.post("/ftp/apply")
@@ -589,6 +605,7 @@ def apply_form(st: State, form) -> list[str]:
     """
     cfg = st.cfg
     errors = []
+    before = memory.tracked(cfg)
     for name, typ in FIELD_TYPES.items():
         if name == "available_days":
             if "availability" in form:  # only present when that section was submitted
@@ -616,6 +633,7 @@ def apply_form(st: State, form) -> list[str]:
     if form.get("clear_anthropic_api_key"):
         cfg.anthropic_api_key = ""
     save_config(st.db, cfg)
+    memory.log_changes(st.db, before, cfg, datetime.now().isoformat(timespec="seconds"))
     st.reload()
     return errors
 
@@ -673,6 +691,7 @@ async def profile_view(request: Request):
     options = await st.health_options()
     return render(request, "profile.html", cfg=st.cfg, weekdays=WEEKDAYS, levels=LEVELS, wkg=wkg,
                   notes=st.db.active_notes(today.isoformat()), health_metrics=health.METRICS,
+                  history=memory.history(st.db, st.cfg, datetime.now(), memory_ids=True),
                   health_latest=health.summary(st.db, today), health_options=options,
                   # Pre-fill only on first setup, so a field cleared on purpose stays cleared
                   health_found={} if health.entities(st.cfg) else health.detect(options or []),

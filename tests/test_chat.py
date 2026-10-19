@@ -27,7 +27,7 @@ def week_plan():
 
 
 def reply(**kw):
-    out = {"reply": "OK", "plan_changes": [], "add_notes": [], "remove_note_ids": []}
+    out = {"reply": "OK", "plan_changes": [], "add_notes": [], "remove_note_ids": [], "remember": [], "forget_memory_ids": []}
     return SimpleNamespace(content=[SimpleNamespace(type="text", text=json.dumps(out | kw))])
 
 
@@ -139,20 +139,29 @@ def test_coach_page_flow(client, monkeypatch):
     monkeypatch.setattr(st, "start_job", lambda name, coro: (coro.close(), started.append(name)))
     ingress = {"X-Ingress-Path": "/api/hassio_ingress/abc"}
     r = client.post("/coach", data={"message": "  Can I race on Sunday?  "}, headers=ingress, follow_redirects=False)
-    assert r.headers["location"] == "/api/hassio_ingress/abc/coach#end" and started == ["chat"]
+    assert r.headers["location"] == "/api/hassio_ingress/abc/coach" and started == ["chat"]
     assert st.db.chat()[-1]["content"] == "Can I race on Sunday?"
 
     today = date.today()
     ws = stats.week_start(today)
     plan_id = st.db.save_plan(ws.isoformat(), "t", "m", {"week_focus": "x", "rationale": "", "block_week": 1,
                                                         "days": [day(today.isoformat(), "zwift", 60, "endurance")]}, [], "nextlevel")
-    msg_id = st.db.add_chat("t", "assistant", "nextlevel", "Swap it.", {"plan_id": plan_id, "days": [
-        day(today.isoformat(), "rest") | {"title": "Rest instead"}]}, [], ["B-race (8 Nov)"])
+    msg_id = st.db.add_chat(f"{today}T10:01:00", "assistant", "nextlevel", "Swap it.", {"plan_id": plan_id, "days": [
+        day(today.isoformat(), "rest") | {"title": "Rest instead"}]}, [], ["B-race (8 Nov)"], ["Rides with a club on Saturdays"])
     note = st.db.add_note("t", "event", "2026-11-08", "2099-11-08", "B-race")
     html = client.get("/coach", headers=ingress).text
     assert "Rest instead" in html and f"/api/hassio_ingress/abc/coach/{msg_id}/apply" in html
     assert "Saved note: B-race (8 Nov)" in html and f"/api/hassio_ingress/abc/notes/{note}/delete" in html
+    assert "Remembered: Rides with a club on Saturdays" in html
     assert 'href="/api/hassio_ingress/abc/coach"' in html
+    assert 'id="chat-scroll"' in html and 'id="end"' in html and ">Today<" in html
+    assert "fetch('/api/hassio_ingress/abc/coach/status')" not in html  # only polled while the coach is typing
+    st.jobs["chat"] = {"running": True}
+    html = client.get("/coach", headers=ingress).text
+    assert "fetch('/api/hassio_ingress/abc/coach/status')" in html and "is typing" in html
+    assert client.get("/coach/status").json() == {"running": True}
+    st.jobs["chat"] = {"running": False}
+    assert client.get("/coach/status").json() == {"running": False}
 
     client.post(f"/coach/{msg_id}/apply")
     assert st.db.active_plan(ws.isoformat())["payload"]["days"][0]["title"] == "Rest instead"
