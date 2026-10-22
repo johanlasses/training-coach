@@ -208,6 +208,7 @@ table.zones td.num { width: 90px; text-align: right; white-space: nowrap; }
 .form-page label { display: block; font-size: 13px; color: var(--text-secondary); margin-bottom: 12px; }
 .form-page label small { display: block; color: var(--text-muted); margin-top: 3px; }
 .form-page label.inline { display: inline-flex; gap: 6px; align-items: center; margin: 0 14px 12px 0; color: var(--text-primary); font-size: 14px; }
+.form-page label small.warn { color: var(--critical); }
 .form-page input:not([type=checkbox], [type=radio]), .form-page textarea, .form-page select, .coach-pick select {
   display: block; width: 100%; margin-top: 4px; font: inherit; font-size: 14px; height: var(--control-h); padding: 0 10px;
   border-radius: var(--radius-sm);

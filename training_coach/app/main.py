@@ -41,6 +41,7 @@ class State:
         self.flash: tuple[str, str] | None = None   # (kind, message) shown once on the next page
         self._tasks: set[asyncio.Task] = set()
         self.sync_tried: datetime | None = None  # last scheduled attempt, so a failing sync doesn't retry every minute
+        self._ha_cache: dict[str, tuple[float, object]] = {}
         self.reload()
 
     def reload(self) -> None:
@@ -122,17 +123,22 @@ class State:
                            | ({"ftp_set_w": applied[d["date"]]} if d["date"] in applied else {}))
         return out
 
+    async def ha_cached(self, key: str, read):
+        """read()'s result, kept for 10 minutes so page loads don't hammer HA. None (HA unreachable) isn't kept."""
+        hit = self._ha_cache.get(key)
+        if hit and time.monotonic() - hit[0] < 600:
+            return hit[1]
+        value = await read()
+        if value is not None:
+            self._ha_cache[key] = (time.monotonic(), value)
+        return value
+
     async def health_options(self) -> list[dict] | None:
-        """Apple Health-looking sensors for Profile's pickers; None when HA can't be read. Cached for 10 minutes,
-        since it means fetching every entity state in HA."""
-        cached = getattr(self, "_health_options", None)
-        if cached and time.monotonic() - cached[0] < 600:
-            return cached[1]
-        states = await ha.states()
-        options = health.candidates(states) if states else None
-        if options is not None:
-            self._health_options = (time.monotonic(), options)
-        return options
+        """Apple Health-looking sensors for Profile's pickers; None when HA can't be read."""
+        async def read():
+            states = await ha.states()
+            return health.candidates(states) if states else None
+        return await self.ha_cached("health", read)
 
     async def do_chat(self) -> None:
         await chat.respond(self.db, self.cfg, self.snapshot(), date.today())
@@ -660,7 +666,15 @@ async def settings_view(request: Request):
         "analysis": {"last": st.db.get("auto_analysis_ran"),
                      "next": next_run(now, cfg.auto_analysis_time, cfg.auto_analysis_day) if cfg.auto_analysis else None},
     }
+    notify_options = await st.ha_cached("notify", ha.notify_services)
+    # A notify.* service HA doesn't have fails every send with a 400: say so, and offer the phone's own service
+    notify_missing = bool(notify_options and cfg.notify_service.startswith("notify.") and cfg.notify_service not in notify_options)
+    # Pre-filled only when unambiguous (the same name under mobile_app_, or the only phone), since saving the form saves it
+    phones = [o for o in notify_options or [] if o.startswith("notify.mobile_app_")]
+    same = "notify.mobile_app_" + cfg.notify_service.removeprefix("notify.")
+    notify_suggest = (same if same in phones else phones[0] if len(phones) == 1 else None) if notify_missing else None
     return render(request, "settings.html", cfg=st.cfg, athlete=st.db.get("strava_athlete"),
+                  notify_options=notify_options, notify_missing=notify_missing, notify_suggest=notify_suggest,
                   usage=usage, schedule=schedule, last_feedback=(st.db.last_llm_call("ride") or "")[:16].replace("T", " "), sync_intervals=SYNC_INTERVALS, day_names=DAY_NAMES,
                   strava_app=st.strava.has_app, authorize_url=st.strava.authorize_url() if st.strava.has_app else None,
                   redirect_uri=REDIRECT_URI, zwift_profile=st.db.get("zwift_profile"), has_secret={k: bool(getattr(st.cfg, k)) for k in SECRETS})

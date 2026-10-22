@@ -7,6 +7,7 @@ spot SDNN taken after a ride reads low, so the overnight/morning value is the us
 """
 from __future__ import annotations
 
+import logging
 from datetime import date, datetime, timedelta
 from math import exp, log
 from statistics import mean
@@ -14,6 +15,8 @@ from statistics import mean
 from . import ha
 from .config import Config
 from .db import DB
+
+logger = logging.getLogger(__name__)
 
 # metric: (label, unit we store)
 METRICS = {
@@ -46,7 +49,7 @@ def normalise(metric: str, value: float, unit: str) -> float | None:
 
 async def fetch(db: DB, cfg: Config, today: date) -> int:
     """Reads every configured sensor and stores today's value. Returns how many were stored."""
-    n = 0
+    stored, skipped = [], []
     for metric, entity in entities(cfg).items():
         s = await ha.state(entity)
         try:
@@ -56,8 +59,14 @@ async def fetch(db: DB, cfg: Config, today: date) -> int:
         value = normalise(metric, raw, (s or {}).get("attributes", {}).get("unit_of_measurement", "")) if raw is not None else None
         if value is not None and value > 0 and changed_on(s) == today:
             db.set_health(today.isoformat(), metric, round(value, 2), METRICS[metric][1], keep_first=metric == "hrv")
-            n += 1
-    return n
+            stored.append(f"{metric} {value:g}")
+        else:
+            unit = (s or {}).get("attributes", {}).get("unit_of_measurement", "")
+            skipped.append(f"{metric} (" + ("no value" if raw is None or (value is not None and value <= 0) else
+                                            f"unknown unit {unit!r}" if value is None else "not reported today") + ")")
+    if stored or skipped:
+        logger.info("Apple Health: stored %s%s", ", ".join(stored) or "nothing", f"; skipped {', '.join(skipped)}" if skipped else "")
+    return len(stored)
 
 
 def changed_on(s: dict) -> date | None:

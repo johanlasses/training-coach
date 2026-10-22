@@ -188,3 +188,57 @@ async def test_mqtt_discovery_names_sensors_training_star(monkeypatch):
     cfg = sent["homeassistant/sensor/training_coach/ftp/config"]
     assert cfg["default_entity_id"] == "sensor.training_ftp" and "object_id" not in cfg
     assert sent[ha.STATE_TOPIC] == {"ftp": 250}
+
+
+@respx.mock
+async def test_fetch_logs_what_it_stored_and_skipped(tmp_path, ha_up, caplog):
+    cfg = Config(health_rhr_entity="sensor.rhr", health_hrv_entity="sensor.hrv", health_sleep_entity="sensor.sleep")
+    respx.get(f"{HA}/api/states/sensor.rhr").respond(json=st("x", "51", "bpm"))
+    respx.get(f"{HA}/api/states/sensor.hrv").respond(json=st("x", "95", "ms", changed="2026-10-14T06:00:00+00:00"))
+    respx.get(f"{HA}/api/states/sensor.sleep").respond(json=st("x", "unavailable", "min"))
+    with caplog.at_level("INFO", logger="app.health"):
+        await health.fetch(DB(tmp_path / "t.db"), cfg, TODAY)
+    assert "Apple Health: stored rhr 51; skipped hrv (not reported today), sleep (no value)" in caplog.text
+
+
+@respx.mock
+async def test_notify_services_and_failed_notify_is_logged(ha_up, caplog):
+    respx.get(f"{HA}/api/services").respond(json=[
+        {"domain": "light", "services": {"turn_on": {}}},
+        {"domain": "notify", "services": {"notify": {}, "send_message": {}, "mobile_app_johan_iphone": {}}}])
+    assert await ha.notify_services() == ["notify.mobile_app_johan_iphone", "notify.notify"]
+    respx.post(f"{HA}/api/services/notify/johan_iphone").respond(400)
+    await ha.notify("notify.johan_iphone", "t", "m")
+    assert "Notify via notify.johan_iphone failed: HTTP 400 (no such service" in caplog.text
+
+
+def test_settings_flags_a_notify_service_ha_does_not_have(client, monkeypatch):
+    services = ["notify.mobile_app_johan_iphone", "notify.notify"]
+
+    async def fake_services():
+        return services
+
+    monkeypatch.setattr(ha, "notify_services", fake_services)
+    client.post("/settings", data={"_section": "schedules", "notify_service": "notify.johan_iphone"})
+    html = client.get("/settings").text
+    assert "notify.johan_iphone doesn&#39;t exist in Home Assistant" in html or "notify.johan_iphone doesn't exist" in html
+    assert 'name="notify_service" value="notify.mobile_app_johan_iphone"' in html
+    assert '<option value="notify.notify">' in html
+    main.app.state.st._ha_cache.clear()
+    client.post("/settings", data={"_section": "schedules", "notify_service": "notify.mobile_app_johan_iphone"})
+    assert "exist in Home Assistant" not in client.get("/settings").text
+
+
+def test_notify_suggestion_only_when_unambiguous(client, monkeypatch):
+    services = ["notify.mobile_app_anna_iphone", "notify.mobile_app_johan_iphone"]
+
+    async def fake_services():
+        return services
+
+    monkeypatch.setattr(ha, "notify_services", fake_services)
+    client.post("/settings", data={"_section": "schedules", "notify_service": "notify.johan_iphone"})
+    assert 'name="notify_service" value="notify.mobile_app_johan_iphone"' in client.get("/settings").text
+    main.app.state.st._ha_cache.clear()
+    client.post("/settings", data={"_section": "schedules", "notify_service": "notify.old_phone"})
+    html = client.get("/settings").text  # two phones, neither matches: keep what's stored, just warn
+    assert 'name="notify_service" value="notify.old_phone"' in html and "Pick one from the list" in html

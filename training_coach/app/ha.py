@@ -37,8 +37,26 @@ async def notify(service: str, title: str, message: str, data: dict | None = Non
     body = {"title": title, "message": message} | ({"data": data} if data and domain == "notify" else {})
     try:
         await _call("POST", f"/services/{domain}/{name}", body)
+    except httpx.HTTPStatusError as e:  # HA's 400 has no useful body: an unknown service or data it rejects
+        log.warning("Notify via %s failed: HTTP %s%s", service, e.response.status_code,
+                    " (no such service in Home Assistant? Pick one on Settings)" if e.response.status_code == 400 else "")
     except httpx.HTTPError as e:
-        log.warning("Notify failed: %s", e)
+        log.warning("Notify via %s failed: %s", service, e)
+
+
+async def notify_services() -> list[str] | None:
+    """The notify.* services HA has, phones (mobile_app_*) first; None when HA can't be read. notify.send_message
+    is left out: it needs a notify entity, not a title and message."""
+    if not available():
+        return None
+    try:
+        domains = (await _call("GET", "/services", timeout=8)).json()
+    except (httpx.HTTPError, ValueError) as e:
+        log.warning("Reading HA services failed: %s", e)
+        return None
+    names = next((d.get("services") or {} for d in domains if d.get("domain") == "notify"), {})
+    return sorted((f"notify.{n}" for n in names if n != "send_message"),
+                  key=lambda s: (not s.startswith("notify.mobile_app_"), s))
 
 
 def addon_slug() -> str:

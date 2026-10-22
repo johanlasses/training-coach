@@ -90,8 +90,11 @@
     <label class="inline"><input type="checkbox" name="zwift_refresh" {{ 'checked' if cfg.zwift_refresh }}> Daily Zwift login refresh {{ when(schedule.zwift) }}</label>
     <p class="hint-row">Apple Health from Home Assistant: {{ when(schedule.health) }} <span class="muted">(local, set up on Profile)</span></p>
     <h3>Notifications</h3>
+    <datalist id="notify-services">{% for o in notify_options or [] %}<option value="{{ o }}">{% endfor %}</datalist>
     <div class="grid2 wide-first">
-      <label>Notify service <input name="notify_service" value="{{ cfg.notify_service }}" placeholder="notify.mobile_app_…">
+      <label>Notify service <input name="notify_service" value="{{ notify_suggest or cfg.notify_service }}" list="notify-services" placeholder="notify.mobile_app_…" autocomplete="off">
+        {% if notify_missing %}<small class="warn"><b>{{ cfg.notify_service }} doesn't exist in Home Assistant</b>, so nothing is sent.
+          {% if notify_suggest %}Save to use {{ notify_suggest }} instead.{% else %}Pick one from the list.{% endif %}</small>{% endif %}
         <small>Ride feedback, the morning session and job notices go here. Leave empty to turn them all off.</small></label>
       <label>Time <input type="time" name="notify_time" value="{{ cfg.notify_time }}">{{ when(schedule.notify) }}</label>
     </div>

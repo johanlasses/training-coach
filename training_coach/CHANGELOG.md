@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.6.1 (2026-10-22)
+
+- **Notifications reach your iPhone again.** The add-on was sending to a notify service Home Assistant doesn't have,
+  so ride feedback, the morning session and job notices never arrived. **Settings** now lists the notify services
+  Home Assistant really has, and warns in red when the one you saved doesn't exist. When it can tell which phone you
+  meant, it fills that in. **After updating, open Settings and press Save once** to switch to it.
+- **Apple Health reads show in the add-on log.** Each hourly read logs which numbers were stored and why any were
+  skipped, e.g. not reported today yet.
+
 ## 0.6.0 (2026-10-19)
 
 - **The Coach chat looks like a messaging app.** It opens on the latest message, only the messages scroll, and the
