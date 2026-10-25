@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.7.0 (2026-10-25)
+
+- **Other people in your household can have their own Training Coach.** Every Home Assistant user gets their own
+  Strava, Zwift, Profile, plan, coach chat, Apple Health and notifications, kept apart from everyone else's.
+  You stay the owner: when someone opens the panel for the first time they see a "no access" page, and you approve
+  them under **Settings → Athletes**, where you also see what each one costs in Claude usage.
+- **They use your Claude key and Strava app, but never see them.** Others can only send notifications to their own
+  phone and read Apple Health sensors from their own phone.
+- **The panel is now visible to all Home Assistant users**, not just admins. Only athletes you approved get in.
+- Your own data and settings are untouched. The Overview sensors in Home Assistant stay yours.
+
 ## 0.6.1 (2026-10-22)
 
 - **Notifications reach your iPhone again.** The add-on was sending to a notify service Home Assistant doesn't have,
