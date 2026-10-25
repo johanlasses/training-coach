@@ -44,10 +44,10 @@ def section(title: str) -> None:
     print(f"\n{title}", flush=True)
 
 
-def dbq(sql: str, *args) -> list[dict]:
-    """Query the add-on's SQLite file: copied out of the container so we never write to it."""
+def dbq(sql: str, *args, db: str = "/data/training.db") -> list[dict]:
+    """Query the add-on's SQLite file (the owner's, or `db`): copied out of the container so we never write to it."""
     with tempfile.TemporaryDirectory() as d:
-        subprocess.run([*COMPOSE, "cp", "addon:/data/training.db", f"{d}/t.db"], check=True, capture_output=True)
+        subprocess.run([*COMPOSE, "cp", f"addon:{db}", f"{d}/t.db"], check=True, capture_output=True)
         conn = sqlite3.connect(f"{d}/t.db")
         conn.row_factory = sqlite3.Row
         return [dict(r) for r in conn.execute(sql, args)]
@@ -132,6 +132,10 @@ def startup() -> None:
     check("Home Assistant API: via Supervisor" in log, "SUPERVISOR_TOKEN survived s6 init (log says 'via Supervisor')")
     check(not tracebacks(), "no tracebacks in the add-on log", "; ".join(tracebacks()))
     check(web.get("/healthz").status_code == 200, "/healthz answers through ingress")
+    owner = json.loads((HERE / ".state/users.json").read_text())["dev"]["id"]
+    kv = {r["key"]: r["value"] for r in dbq("SELECT key, value FROM kv WHERE key='owner_user_id'")}
+    check(json.loads(kv.get("owner_user_id", "null")) == owner and "owns the add-on" in log,
+          "the owner is HA's owner, learned over Core's websocket before anyone visits", str(kv))
 
 
 def pages_and_urls() -> None:
@@ -330,6 +334,70 @@ def failure_modes() -> None:
     httpx.post(f"{STRAVA}/_dev/fail", params={"rate_limit": 0})
 
 
+def notice(r: httpx.Response) -> str:
+    return str(re.findall(r'class="notice[^>]*>([^<]*)', r.text)[:1])
+
+
+def multi_tenant() -> None:
+    section("A second athlete (dev2, read-only HA user with Dev iPhone 2)")
+    users = json.loads((HERE / ".state/users.json").read_text())
+    uid = users["dev2"]["id"]
+    db2 = f"/data/athletes/{uid}/training.db"
+    web2 = httpx.Client(base_url=INGRESS, follow_redirects=True, timeout=30, cookies={"tc_dev_user": "dev2"})
+    stranger = httpx.Client(base_url=INGRESS, timeout=30, cookies={"tc_dev_user": "stranger"})
+    r = web2.get("/")
+    check(r.status_code == 403 and "Hi Dev Two" in r.text, "an HA user the owner hasn't added gets the access page", str(r.status_code))
+    check(stranger.get("/settings").status_code == 403, "…on every page")
+    s = page("/settings")
+    check("Asking for access" in s and "Dev Two" in s, "the owner sees the request on Settings → Athletes")
+    check(web2.post(f"/athletes/{uid}/approve").status_code == 403, "dev2 can't approve themselves")
+    r = post(f"/athletes/{uid}/approve")
+    check("Dev Two can use Training Coach now" in r.text, "the owner approves dev2", notice(r))
+    home2 = web2.get("/")
+    check(home2.status_code == 200 and "Zwift - Endurance" not in home2.text and not dbq("SELECT id FROM activities", db=db2),
+          "dev2 gets an empty add-on of their own, none of the owner's rides")
+    s2 = web2.get("/settings").text
+    check("Claude (AI coach and analysis)" not in s2 and "Athletes" not in s2, "dev2 sees no Claude key or Athletes card")
+    check('value="12345"' not in s2 and "Strava API app, so there" in s2, "dev2 uses the owner's Strava app without seeing it")
+    check("notify.mobile_app_dev_iphone_2" in s2 and 'value="notify.mobile_app_dev_iphone"' not in s2,
+          "dev2's notify list is only their own phone")
+    r = web2.post("/settings", data={"_section": "schedules", "notify_service": NOTIFY})
+    check("from your phone" in r.text, "dev2 can't point notifications at the owner's phone", notice(r))
+    r = web2.post("/settings", data={"_section": "schedules", "notify_service": NOTIFY + "_2"})
+    check("Settings saved" in r.text, "dev2 saves their own phone's notify service", notice(r))
+    check("Fill in your Profile" in web2.get("/plan").text, "dev2 is asked for a Profile before the first plan")
+    p2 = web2.get("/profile").text
+    own = {k: v.replace("dev_iphone_", "dev_iphone_2_") for k, v in HEALTH_FIELDS.items()}
+    check(all(e in p2 for e in own.values()) and "sensor.dev_iphone_resting" not in p2,
+          "dev2's Apple Health pickers offer only Dev iPhone 2")
+    r = web2.post("/profile", data={**own, "health_hrv_entity": HEALTH_FIELDS["health_hrv_entity"], "availability": "1",
+                                    "available_days": ["tue", "sat"], "max_weekday_minutes": "45", "max_weekend_minutes": "150"})
+    check("from your phone" in r.text, "dev2 can't read the owner's Apple Health sensors", notice(r))
+    web2.post("/profile", data=own)
+    check("Fill in your Profile" not in web2.get("/plan").text, "after saving the Profile, dev2 can plan")
+    rows = wait(lambda: (lambda r: r if len(r) >= 5 else None)(dbq("SELECT metric, value FROM health_daily", db=db2)),
+                "dev2's scheduler to read Dev iPhone 2's sensors", 120)
+    rhr = {r["metric"]: r["value"] for r in rows or []}.get("rhr")
+    check(rhr == 62, f"dev2's health values are their own phone's (resting HR {rhr}, owner's is 52)")
+    owner_rides = len(dbq("SELECT id FROM activities"))
+    r = web2.get(f"{STRAVA}/oauth/authorize", params={"redirect_uri": "http://localhost/strava-callback",
+                                                     "scope": "read,activity:read_all"}, follow_redirects=False)
+    r = web2.post("/settings/strava/connect", data={"redirect_url": r.headers["location"]})
+    check("Connected to Strava" in r.text, "dev2 connects their own Strava account", notice(r))
+    wait(lambda: len(dbq("SELECT id FROM activities", db=db2)) >= 20, "dev2's first sync", 90)
+    check(len(dbq("SELECT id FROM activities")) == owner_rides, "dev2's sync leaves the owner's rides alone")
+    check(bool(dbq("SELECT 1 FROM kv WHERE key='strava_token'", db=db2)), "dev2's Strava token is in dev2's own DB")
+    httpx.delete(f"{SUP}/_dev/push")
+    httpx.post(f"{STRAVA}/_dev/ride", params={"kind": 2, "minutes_ago": 15})
+    web2.post("/sync")
+    got = wait(lambda: [p for p in pushes() if "dev-push-token-2" in json.dumps(p)], "a ride push to Dev iPhone 2", 90)
+    check(bool(got), "dev2's ride feedback goes to Dev iPhone 2")
+    sensors = [e for e in ha_states() if e.startswith("sensor.training_")]
+    check(len(sensors) == 9, f"no extra MQTT sensors for dev2 ({len(sensors)} sensor.training_*)")
+    r = post(f"/athletes/{uid}/remove")
+    check(web2.get("/").status_code == 403 and "no longer has access" in r.text, "the owner can remove dev2 again", notice(r))
+
+
 def mobile() -> None:
     section("iPhone layout (tools/mobile_check.py)")
     r = subprocess.run([str(HERE.parent / ".venv/bin/python"), str(HERE.parent / "tools/mobile_check.py")],
@@ -356,6 +424,7 @@ def main() -> None:
     plan_and_modes()
     chat_and_analysis()
     zwift()
+    multi_tenant()
     tb = tracebacks()
     check(not tb, "no unexpected tracebacks during the happy paths", "; ".join(tb[:3]))
     failure_modes()

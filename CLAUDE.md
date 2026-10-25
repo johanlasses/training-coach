@@ -28,6 +28,12 @@ CI (`.github/workflows/test.yml`) runs ruff and pytest on push.
   `johanlasses/training-coach`. `/release-addon` has the one-off credential command. Never persist it.
 - **The user is on an iPhone.** Any template or CSS change must pass the `check-mobile` skill before it's done.
   Don't use inline `style="grid-template-columns…"`, because it overrides the responsive media queries.
+- **Multi-tenant: every route gets its State from `athlete(request)`**, never `request.app.state.st` (that's the owner's,
+  for tests only; `tests/test_athletes.py` greps for it). One DB per HA user: the owner (HA's `is_owner` user) keeps
+  `/data/training.db`, others `/data/athletes/<user id>/`. Non-owners get the owner's Claude key and Strava app through
+  `State.shared` and must never have them saved (`State.save()`, not `save_config`). Anything a non-owner sets that the
+  add-on's admin token acts on (notify service, entities to read) must be checked against their own phone (`own_phone`,
+  `ha.user_devices`).
 - **Settings live in the DB, not in the add-on options.** `training_coach/config.yaml` has no `options:`. All fields are in
   `app/config.py` (`Config`) and are saved by `apply_form` in `main.py`. Credentials and notifications go on **Settings**
   (`templates/settings.html`); athlete data and availability go on **Profile** (`templates/profile.html`).

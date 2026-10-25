@@ -3,6 +3,7 @@
 {% block content %}
 <div class="form-page form-cols">
 
+{% if is_owner %}
 <section class="card">
   <h2>Claude (AI coach and analysis)</h2>
   <p class="caption">Create a key at <a href="https://console.anthropic.com/settings/keys" target="_blank" rel="noopener">console.anthropic.com</a>.
@@ -22,12 +23,54 @@
 </section>
 
 <section class="card">
+  <h2>Athletes</h2>
+  <p class="caption">Home Assistant users who can use Training Coach, each with their own Strava, Zwift, plan and coach.
+    Their Claude calls run on your API key. Someone who opens the panel without access shows up here to approve.</p>
+  <table class="zones usage">
+    <tr class="muted"><td>Athlete</td><td>Since</td><td class="num">Claude this month</td><td></td></tr>
+    <tr><td><b>{{ owner_name or 'You' }}</b> <small class="muted">owner</small></td><td></td><td class="num">${{ '%.2f' % athletes.own_cost }}</td><td></td></tr>
+    {% for a in athletes.rows %}
+    <tr><td>{{ a.name }}</td><td>{{ a.added }}</td><td class="num">${{ '%.2f' % a.cost }}</td>
+      <td class="num"><form method="post" action="{{ base }}/athletes/{{ a.uid }}/remove"><button class="secondary">Remove</button></form></td></tr>
+    {% endfor %}
+  </table>
+  {% if athletes.requests %}
+  <h3>Asking for access</h3>
+  <table class="zones usage">
+    {% for uid, r in athletes.requests.items() %}
+    <tr><td>{{ r.name }}<br><small class="muted">{{ r.at | replace('T', ' ') }}</small></td>
+      <td class="num"><div class="row">
+        <form method="post" action="{{ base }}/athletes/{{ uid }}/approve"><button>Approve</button></form>
+        <form method="post" action="{{ base }}/athletes/{{ uid }}/dismiss"><button class="secondary">Dismiss</button></form></div></td></tr>
+    {% endfor %}
+  </table>
+  {% endif %}
+</section>
+{% endif %}
+
+<section class="card">
   <h2>Strava</h2>
   {% if athlete and strava_ok %}
     <p>✓ Connected as <b>{{ athlete.firstname }} {{ athlete.lastname }}</b>.</p>
     <form method="post" action="{{ base }}/settings/strava/disconnect"><button class="secondary">Disconnect</button></form>
   {% else %}
   <ol class="steps-list">
+    {% if shared_strava %}
+    <li>
+      <p>Connect your own Strava account below. It goes through {{ owner_name }}'s Strava API app, so there's nothing to set up.</p>
+      <details><summary class="muted">Use your own Strava API app instead (optional)</summary>
+      <p>Create one at <a href="https://www.strava.com/settings/api" target="_blank" rel="noopener">strava.com/settings/api</a>
+        with <b>Authorization Callback Domain</b> <code>localhost</code>, then enter it here.</p>
+      <form method="post" action="{{ base }}/settings">
+        <div class="grid2">
+          <label>Client ID <input name="strava_client_id" inputmode="numeric"></label>
+          <label>Client secret <input type="password" name="strava_client_secret" autocomplete="off"></label>
+        </div>
+        <button class="secondary">Save</button>
+      </form>
+      </details>
+    </li>
+    {% else %}
     <li>
       <p>Create an API application at <a href="https://www.strava.com/settings/api" target="_blank" rel="noopener">strava.com/settings/api</a>.
         Set <b>Authorization Callback Domain</b> to <code>localhost</code>. Any name, website and icon will do.</p>
@@ -40,6 +83,7 @@
         <button class="secondary">Save</button>
       </form>
     </li>
+    {% endif %}
     <li class="{{ 'disabled' if not strava_app }}">
       <p>Approve access on Strava. Tick every box.</p>
       {% if authorize_url %}<a class="btn" href="{{ authorize_url }}" target="_blank" rel="noopener">Connect with Strava</a>
@@ -95,6 +139,8 @@
       <label>Notify service <input name="notify_service" value="{{ notify_suggest or cfg.notify_service }}" list="notify-services" placeholder="notify.mobile_app_…" autocomplete="off">
         {% if notify_missing %}<small class="warn"><b>{{ cfg.notify_service }} doesn't exist in Home Assistant</b>, so nothing is sent.
           {% if notify_suggest %}Save to use {{ notify_suggest }} instead.{% else %}Pick one from the list.{% endif %}</small>{% endif %}
+        {% if phones is not none and not phones %}<small class="warn">No phone found for you in Home Assistant. Install the Home Assistant
+          app on your iPhone and sign in with your own account, then come back.</small>{% endif %}
         <small>Ride feedback, the morning session and job notices go here. Leave empty to turn them all off.</small></label>
       <label>Time <input type="time" name="notify_time" value="{{ cfg.notify_time }}">{{ when(schedule.notify) }}</label>
     </div>
@@ -119,7 +165,7 @@
 
 <section class="card">
   <h2>Claude usage</h2>
-  <p class="caption">Tokens per call type. Input includes cached tokens. Cost is an estimate from list prices.
+  <p class="caption">{% if not is_owner %}Claude runs on {{ owner_name }}'s API key. {% endif %}Tokens per call type. Input includes cached tokens. Cost is an estimate from list prices.
     Plan and analysis run on Opus (they need the reasoning), chat on Sonnet, and ride feedback on Haiku (it runs
     after every ride).</p>
   {% for period, rows in usage.items() %}

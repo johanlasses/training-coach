@@ -9,10 +9,12 @@
   <form method="post" action="{{ base }}/plan?week={{ week.isoformat() }}">
     <input type="hidden" name="coach" value="{{ coach }}">
     {% set planning = jobs.plan and jobs.plan.running %}
-    <button {{ 'disabled' if not ai_ok or planning }}>
+    <button {{ 'disabled' if not ai_ok or planning or needs_profile }}>
       {% if planning %}Coach is planning…{% elif plan %}Re-plan remaining days{% else %}Generate with {{ coach | coach_name }}{% endif %}</button>
   </form>
 </div>
+{% if needs_profile %}<div class="notice">Welcome! <a href="{{ base }}/profile">Fill in your Profile</a> first: your training days, hours per
+  session and goals. The coach plans around them.</div>{% endif %}
 
 <nav class="tabs" aria-label="Coach">
   {% for k in tabs %}

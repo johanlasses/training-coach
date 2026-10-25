@@ -11,6 +11,7 @@ ingress: true
 ingress_port: 8099
 panel_icon: mdi:bike
 panel_title: Training
+panel_admin: false  # every HA user sees the panel; the add-on lets in only the athletes its owner added
 homeassistant_api: true
 services:
   - mqtt:want

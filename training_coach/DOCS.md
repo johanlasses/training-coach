@@ -159,10 +159,36 @@ If the login expires, Settings asks you to sign in again.
 **Download .zwo.** You can always save the file to `Documents/Zwift/Workouts/<your Zwift id>/` yourself
 instead.
 
+## Several athletes
+
+Other Home Assistant users can have their own Training Coach: their own Strava and Zwift accounts, Profile
+(training days, hours per session, goals), plan, coach chat, Apple Health and notifications. Home Assistant's owner
+(the user who set HA up) owns the add-on and decides who gets in.
+
+1. Create the person in **Settings → People** with login allowed and *not* an administrator.
+2. They open **Training** in the sidebar and get an "ask for access" page. You approve them under
+   **Settings → Athletes**, which also shows what each athlete's Claude calls cost this month.
+3. They install the Home Assistant iPhone app and sign in **as themselves**. Their phone is then theirs in the add-on:
+   only its notify service and Apple Health sensors can be picked on their Settings and Profile.
+4. They connect their own Strava on Settings. That goes through your Strava API app: raise its athlete capacity
+   from 1 to 10 on [strava.com/settings/api](https://www.strava.com/settings/api) (no review needed). Its rate limit is
+   shared by everyone. An athlete can enter their own Strava API app instead.
+
+What's shared: your Claude API key (they can't see or change it) and, unless they set their own, the Strava app.
+What isn't: everything else. Removing an athlete keeps their data, so approving them again brings it back.
+
+**Home Assistant has no per-user permissions.** Hiding dashboards ("Visible only to admins") is cosmetic. A normal
+user can still control every device through HA's API. For people outside your household, also put the user in HA's
+read-only group (WebSocket `config/auth/update` with `group_ids: ["system-read-only"]`; there's no UI for it). They
+can then still read every entity's state, for example who's home. If they connect over Tailscale, share only the HA
+machine and allow only port 8123 for `autogroup:shared` in the tailnet policy. Otherwise MQTT, which accepts any HA
+user's password, is reachable too.
+
 ## Sensors
 
 If the MQTT integration is set up, the add-on publishes `sensor.training_ftp`, `_wkg`, `_ctl`,
-`_atl`, `_tsb`, `_week_hours`, `_week_km` and `_today_session` for use on other dashboards.
+`_atl`, `_tsb`, `_week_hours`, `_week_km` and `_today_session` for use on other dashboards. They're the owner's;
+other athletes get no sensors.
 
 ## Data
 

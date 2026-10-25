@@ -1,6 +1,7 @@
 """Home Assistant access: notifications and state reads via the Supervisor proxy, sensors via MQTT."""
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import os
@@ -85,6 +86,43 @@ async def states() -> list[dict]:
     except (httpx.HTTPError, ValueError) as e:
         log.warning("Reading HA states failed: %s", e)
         return []
+
+
+async def owner_user_id() -> str | None:
+    """The id of Home Assistant's owner (the user who set HA up), from Core's websocket API: Supervisor proxies it for
+    add-ons with homeassistant_api, as its own admin user. None when HA can't be asked (not started yet, local runs)."""
+    if not available():
+        return None
+    import websockets
+
+    url = HA_URL.replace("http", "ws", 1) + ("/websocket" if SUPERVISOR_TOKEN else "/api/websocket")
+    async def ask() -> dict | None:
+        async with websockets.connect(url, open_timeout=5, max_size=None) as ws:
+            await ws.recv()  # auth_required
+            await ws.send(json.dumps({"type": "auth", "access_token": HA_TOKEN}))
+            if json.loads(await ws.recv()).get("type") != "auth_ok":
+                return None
+            await ws.send(json.dumps({"id": 1, "type": "config/auth/list"}))
+            return json.loads(await ws.recv())
+
+    try:
+        r = await asyncio.wait_for(ask(), 10) or {}  # a half-started Core mustn't hold up the add-on's start
+    except (OSError, TimeoutError, websockets.WebSocketException, ValueError) as e:
+        log.info("Asking HA for its owner failed: %s", e)
+        return None
+    return next((u["id"] for u in r.get("result") or [] if u.get("is_owner")), None)
+
+
+async def user_devices(user_id: str) -> list[str] | None:
+    """The phones a Home Assistant user signed in to with the companion app, as slugs: the device trackers HA adds to
+    their person, e.g. johans_iphone for device_tracker.johans_iphone. The phone's sensors are sensor.<slug>_* and its
+    notify service notify.mobile_app_<slug>. None when HA can't be read."""
+    all_states = await states()
+    if not all_states:
+        return None
+    return sorted({t.removeprefix("device_tracker.") for s in all_states if s.get("entity_id", "").startswith("person.")
+                   and (s.get("attributes") or {}).get("user_id") == user_id
+                   for t in s["attributes"].get("device_trackers") or [] if t.startswith("device_tracker.")})
 
 
 async def state(entity_id: str) -> dict | None:

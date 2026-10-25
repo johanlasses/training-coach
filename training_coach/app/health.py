@@ -84,12 +84,19 @@ def metric_of(entity_id: str) -> str | None:
     return next((m for m, key in SENSOR_KEYS.items() if entity_id.endswith("_" + key)), None)
 
 
-def candidates(states: list[dict]) -> list[dict]:
+def phone_sensors(phones: list[str]) -> set[str]:
+    """The Apple Health entity ids the iOS app gives these phones (exact: a phone "iphone" mustn't match iphone_2's)."""
+    return {f"sensor.{p}_{key}" for p in phones for key in SENSOR_KEYS.values()}
+
+
+def candidates(states: list[dict], phones: list[str] | None = None) -> list[dict]:
     """Sensors that look like Apple Health data, for the entity pickers on Profile: the iOS app's own names, or
-    "health" in the id or name (Health Auto Export and the like)."""
+    "health" in the id or name (Health Auto Export and the like). With `phones`, only those devices' sensors."""
     out = []
     for s in states:
         eid, name = s.get("entity_id", ""), s.get("attributes", {}).get("friendly_name", "")
+        if phones is not None and eid not in phone_sensors(phones):
+            continue
         if eid.startswith("sensor.") and (metric_of(eid) or "health" in eid or "health" in name.lower()):
             unit = s.get("attributes", {}).get("unit_of_measurement", "")
             out.append({"entity_id": eid, "metric": metric_of(eid), "unit": unit,

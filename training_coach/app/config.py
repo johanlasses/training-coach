@@ -46,7 +46,7 @@ class Config:
     available_days: list[str] = field(default_factory=lambda: ["mon", "tue", "wed", "thu", "sat", "sun"])
     max_weekday_minutes: int = 75
     max_weekend_minutes: int = 180
-    notify_service: str = "notify.mobile_app_johan_iphone"
+    notify_service: str = ""  # Settings suggests the athlete's phone
     goals: str = ""
     athlete_level: str = "intermediate"
     sessions_per_week: int = 5

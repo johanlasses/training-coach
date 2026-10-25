@@ -39,6 +39,9 @@ Setup steps are in [training_coach/DOCS.md](training_coach/DOCS.md).
 - **Models** (`llm.MODELS`): Opus for plan and analysis, Sonnet for chat, Haiku for ride feedback.
 - **Scheduler** (`State.scheduler` in `app/main.py`): a one-minute tick with configurable slots. Every Claude call is logged
   in `llm_calls` for the usage table.
+- **Athletes** (`Athletes`, `athlete()` in `app/main.py`): one `State` and SQLite DB per Home Assistant user, picked from
+  Supervisor's `X-Remote-User-Id` ingress header. HA's owner owns the add-on and approves the others, who share the
+  owner's Claude key and Strava app but nothing else.
 - **UI**: FastAPI and Jinja behind HA ingress, Chart.js (vendored), with no build step.
 
 ## Develop

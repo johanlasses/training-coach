@@ -3,8 +3,10 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 import time
 from contextlib import asynccontextmanager
+from dataclasses import replace
 from datetime import date, datetime, timedelta, timezone
 from html import escape as html_escape
 from pathlib import Path
@@ -12,14 +14,15 @@ from pathlib import Path
 import httpx
 import markdown as md
 from fastapi import FastAPI, HTTPException, Query, Request
-from fastapi.responses import JSONResponse, RedirectResponse, Response
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
 from . import analysis, chat, coaches, feedback, ftptest, ha, health, memory, overview, stats, workouts
 from . import coach as coach_mod
 from . import llm
-from .config import DATA_DIR, FIELD_TYPES, LEVELS, SECRETS, SYNC_INTERVALS, WEEKDAYS, level_for_wkg, load_config, save_config
+from .config import (DATA_DIR, FIELD_TYPES, LEVELS, SECRETS, SYNC_INTERVALS, WEEKDAYS, Config, level_for_wkg, load_config,
+                     save_config)
 from .db import DB
 from .strava import REDIRECT_URI, StravaClient
 from .sync import recompute, sync
@@ -31,12 +34,20 @@ log = logging.getLogger("training_coach")
 HERE = Path(__file__).parent
 DUE_WINDOW = timedelta(hours=3)
 HEALTH_EVERY = timedelta(hours=1)  # a local HA read, no external API
+INGRESS_IP = "172.30.32.2"  # Supervisor on the hassio network: ingress requests come from here
+ATHLETE_ID = re.compile(r"[A-Za-z0-9_-]{1,64}")  # HA user ids are uuid hex; also a folder name, so nothing else
+STRAVA_APP = ("strava_client_id", "strava_client_secret")
 
 
 class State:
-    def __init__(self) -> None:
-        DATA_DIR.mkdir(parents=True, exist_ok=True)
-        self.db = DB(DATA_DIR / "training.db")
+    """One athlete: their DB, settings, Strava and Zwift logins, jobs and scheduler. The owner's State has no `owner`;
+    the others take the Claude key (always) and the Strava API app (unless they set their own) from it."""
+
+    def __init__(self, path: Path | None = None, owner: State | None = None, user_id: str = "", name: str = "") -> None:
+        path = path or DATA_DIR / "training.db"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        self.db = DB(path)
+        self.owner, self.user_id, self.name = owner, user_id, name
         self.jobs: dict[str, dict] = {}
         self.flash: tuple[str, str] | None = None   # (kind, message) shown once on the next page
         self._tasks: set[asyncio.Task] = set()
@@ -44,10 +55,44 @@ class State:
         self._ha_cache: dict[str, tuple[float, object]] = {}
         self.reload()
 
+    @property
+    def is_owner(self) -> bool:
+        return self.owner is None
+
     def reload(self) -> None:
-        self.cfg = load_config(self.db)
-        self.strava = StravaClient(self.db, self.cfg.strava_client_id, self.cfg.strava_client_secret)
+        self.cfg = cfg = load_config(self.db)
+        self.shared: set[str] = set()  # fields filled in from the owner, never saved in this DB
+        if self.owner:
+            own = self.owner.cfg
+            cfg.anthropic_api_key = own.anthropic_api_key
+            self.shared.add("anthropic_api_key")
+            if not (cfg.strava_client_id or cfg.strava_client_secret):
+                cfg.strava_client_id, cfg.strava_client_secret = own.strava_client_id, own.strava_client_secret
+                self.shared.update(STRAVA_APP)
+            # The add-on's Supervisor token can call any service and read any entity: an athlete only gets their
+            # phone's notifications and sensors (checked against the phone on save, this is the backstop).
+            if not cfg.notify_service.startswith("notify.mobile_app_"):
+                cfg.notify_service = ""
+            for m in health.METRICS:
+                if not getattr(cfg, f"health_{m}_entity").startswith("sensor."):
+                    setattr(cfg, f"health_{m}_entity", "")
+        self.strava = StravaClient(self.db, cfg.strava_client_id, cfg.strava_client_secret)
         self.zwift = ZwiftClient(self.db)
+
+    def own_cfg(self) -> Config:
+        """The settings this athlete set themselves: the owner's shared values blanked out."""
+        return replace(self.cfg, **{k: "" for k in self.shared})
+
+    def save(self) -> None:
+        save_config(self.db, self.own_cfg())
+
+    async def phones(self) -> list[str] | None:
+        """Slugs of the athlete's own phones (HA companion app); None for the owner, who can pick any entity."""
+        if self.is_owner:
+            return None
+        async def read():
+            return await ha.user_devices(self.user_id) or None  # an empty answer isn't cached: the app may be new
+        return await self.ha_cached("phones", read) or []
 
     def start_job(self, name: str, coro) -> bool:
         """Run a coroutine in the background, at most one per name. Returns False if already running."""
@@ -134,10 +179,11 @@ class State:
         return value
 
     async def health_options(self) -> list[dict] | None:
-        """Apple Health-looking sensors for Profile's pickers; None when HA can't be read."""
+        """Apple Health-looking sensors for Profile's pickers (an athlete's own phone only); None when HA can't be read."""
+        phones = await self.phones()
         async def read():
             states = await ha.states()
-            return health.candidates(states) if states else None
+            return health.candidates(states, phones) if states else None
         return await self.ha_cached("health", read)
 
     async def do_chat(self) -> None:
@@ -151,6 +197,8 @@ class State:
         await analysis.run_analysis(self.db, self.cfg, self.snapshot(), "manual", coach_key)
 
     async def publish(self) -> None:
+        if not self.is_owner:  # the sensors are the owner's; other athletes' would only clutter the owner's HA
+            return
         today = date.today()
         d = stats.dashboard(self.db.activities(since_local=(today - timedelta(days=400)).isoformat()), today, self.cfg)
         session = today_session(self.db, today)
@@ -194,8 +242,11 @@ class State:
     def ran(self, key: str, now: datetime) -> None:
         self.db.set(key, now.date().isoformat())
 
-    async def scheduler(self) -> None:
-        """Minute tick. Every job, and when it runs, is set on Settings → Schedules. Claude jobs are off by default."""
+    async def scheduler(self, delay: float = 0) -> None:
+        """Minute tick. Every job, and when it runs, is set on Settings → Schedules. Claude jobs are off by default.
+        `delay` staggers the athletes, so their Strava syncs don't land in the same second."""
+        if delay:
+            await asyncio.sleep(delay)
         while True:
             try:
                 now = datetime.now()
@@ -268,20 +319,152 @@ def today_session(db: DB, today: date) -> dict | None:
     return next((d for d in plan["payload"]["days"] if d["date"] == today.isoformat() and d["kind"] != "rest"), None)
 
 
+class NoAccess(Exception):
+    def __init__(self, name: str) -> None:
+        self.name = name
+
+
+class Athletes:
+    """Every athlete's State by Home Assistant user id. HA's owner (the user who set HA up) owns the add-on: they keep
+    /data/training.db and the shared settings (Claude key, Strava app) and let others in. The others get their own
+    DB under /data/athletes/<user id>/. Removing an athlete keeps their folder, so adding them back restores it."""
+
+    def __init__(self) -> None:
+        self.owner = State(DATA_DIR / "training.db")
+        self.owner.name = self.owner.db.get("owner_name") or ""  # shown to the others ("Johan's Strava app")
+        self.others = {uid: self._state(uid, a["name"]) for uid, a in self.listed().items()}
+        self._tasks: dict[str, asyncio.Task] = {}
+
+    def _state(self, uid: str, name: str) -> State:
+        return State(DATA_DIR / "athletes" / uid / "training.db", owner=self.owner, user_id=uid, name=name)
+
+    def listed(self) -> dict[str, dict]:
+        return self.owner.db.get("athletes") or {}
+
+    def requests(self) -> dict[str, dict]:
+        return self.owner.db.get("access_requests") or {}
+
+    async def find_owner(self) -> bool:
+        """Learns HA's owner once. Never the first visitor: with the panel open to every HA user, whoever opened it
+        first after an update would take over the owner's data."""
+        if self.owner.db.get("owner_user_id"):
+            return True
+        uid = await ha.owner_user_id()
+        if uid:
+            self.owner.db.set("owner_user_id", uid)
+            log.info("Home Assistant's owner (%s) owns the add-on", uid)
+        return bool(uid)
+
+    async def keep_finding_owner(self) -> None:
+        """At boot the add-on can start before HA Core does."""
+        while not await self.find_owner():
+            await asyncio.sleep(30)
+
+    def resolve(self, uid: str, name: str) -> State:
+        """The user's State; an unknown user is noted as asking for access."""
+        owner_id = self.owner.db.get("owner_user_id")
+        if not owner_id:
+            raise HTTPException(503, "Training Coach is still asking Home Assistant who its owner is. Reload in a minute.")
+        if uid == owner_id:
+            if name != self.owner.name:
+                self.owner.db.set("owner_name", name)
+            self.owner.user_id, self.owner.name = uid, name
+            return self.owner
+        if uid in self.others:
+            return self.others[uid]
+        reqs = self.requests()
+        if uid not in reqs:
+            reqs[uid] = {"name": name, "at": datetime.now().isoformat(timespec="minutes")}
+            self.owner.db.set("access_requests", reqs)
+        raise NoAccess(name)
+
+    def approve(self, uid: str) -> str | None:
+        reqs = self.requests()
+        if uid not in reqs:
+            return None
+        req = reqs.pop(uid)
+        self.owner.db.set("access_requests", reqs)
+        self.owner.db.set("athletes", self.listed() | {uid: {"name": req["name"], "added": date.today().isoformat()}})
+        self.others[uid] = st = self._state(uid, req["name"])
+        self.start(uid, st)
+        return req["name"]
+
+    def dismiss(self, uid: str) -> str | None:
+        reqs = self.requests()
+        req = reqs.pop(uid, None)
+        self.owner.db.set("access_requests", reqs)
+        return req and req["name"]
+
+    def remove(self, uid: str) -> str | None:
+        listed = self.listed()
+        a = listed.pop(uid, None)
+        self.owner.db.set("athletes", listed)
+        self.others.pop(uid, None)
+        if task := self._tasks.pop(uid, None):
+            task.cancel()
+        return a and a["name"]
+
+    def reload_shared(self) -> None:
+        """After the owner's settings change: the others pick up the Claude key and Strava app."""
+        for st in self.others.values():
+            st.reload()
+
+    def start(self, key: str, st: State) -> None:
+        self._tasks[key] = asyncio.create_task(st.scheduler(delay=(len(self._tasks) * 7) % 60))
+
+    def start_all(self) -> None:
+        self._tasks["owner?"] = asyncio.create_task(self.keep_finding_owner())
+        self.start("", self.owner)
+        for uid, st in self.others.items():
+            self.start(uid, st)
+
+    def stop_all(self) -> None:
+        for task in self._tasks.values():
+            task.cancel()
+
+
+def athlete(request: Request) -> State:
+    """The State of the Home Assistant user behind the request. Supervisor's ingress sets X-Remote-User-Id and drops
+    any the browser sent, so it's only trusted from Supervisor. Outside HA (local runs, tests) it's the owner's."""
+    reg: Athletes = request.app.state.athletes
+    if not ha.SUPERVISOR_TOKEN:
+        return reg.owner
+    uid = request.headers.get("X-Remote-User-Id", "")
+    if not request.client or request.client.host != INGRESS_IP or not ATHLETE_ID.fullmatch(uid):
+        raise HTTPException(403, "Open Training Coach from the Home Assistant sidebar")
+    name = request.headers.get("X-Remote-User-Display-Name") or request.headers.get("X-Remote-User-Name") or "Someone"
+    return reg.resolve(uid, name)
+
+
+def owner_only(request: Request) -> State:
+    st = athlete(request)
+    if not st.is_owner:
+        raise HTTPException(403, "Only the add-on's owner can do that")
+    return st
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    st = State()
-    app.state.st = st
+    reg = Athletes()
+    app.state.athletes = reg
+    app.state.st = reg.owner  # for tests and debugging: routes always go through athlete(request)
     log.info("Home Assistant API: %s", "via Supervisor" if ha.SUPERVISOR_TOKEN else ha.HA_URL or
              "not available (no SUPERVISOR_TOKEN: notifications, sensors and Apple Health are off)")
-    task = asyncio.create_task(st.scheduler())
+    log.info("Athletes: owner + %d", len(reg.others))
+    await reg.find_owner()  # before the first page; keeps trying in the background if HA isn't up yet
+    reg.start_all()
     yield
-    task.cancel()
+    reg.stop_all()
 
 
 app = FastAPI(lifespan=lifespan, docs_url=None, redoc_url=None, openapi_url=None)
 app.mount("/static", StaticFiles(directory=HERE / "static"), name="static")
 templates = Jinja2Templates(directory=HERE / "templates")
+
+
+@app.exception_handler(NoAccess)
+async def no_access(request: Request, exc: NoAccess) -> HTMLResponse:
+    return templates.TemplateResponse(request, "no_access.html", {"base": base(request), "name": exc.name}, status_code=403)
 
 
 def fmt_duration(secs: int | None) -> str:
@@ -310,10 +493,11 @@ def base(request: Request) -> str:
 
 
 def render(request: Request, name: str, **ctx) -> Response:
-    st: State = request.app.state.st
+    st = athlete(request)
     flash, st.flash = st.flash, None
     return templates.TemplateResponse(request, name, {
         "base": base(request), "jobs": st.jobs, "last_sync": st.db.get("last_sync"), "flash": flash,
+        "is_owner": st.is_owner, "owner_name": (st.owner.name if st.owner else st.name) or "the owner",
         "strava_ok": st.strava.configured, "zwift_ok": st.zwift.configured, "ai_ok": bool(st.cfg.anthropic_api_key), **ctx})
 
 
@@ -329,7 +513,7 @@ def back(request: Request, path: str) -> RedirectResponse:
 
 @app.get("/")
 async def home(request: Request):
-    st: State = request.app.state.st
+    st = athlete(request)
     today = date.today()
     acts = st.db.activities(since_local=(today - timedelta(days=400)).isoformat())
     d = stats.dashboard(acts, today, st.cfg)
@@ -341,7 +525,7 @@ async def home(request: Request):
 
 @app.get("/activity/{activity_id}")
 async def activity(request: Request, activity_id: int):
-    st: State = request.app.state.st
+    st = athlete(request)
     a = st.db.activity(activity_id)
     if not a:
         raise HTTPException(404)
@@ -357,7 +541,7 @@ async def activity(request: Request, activity_id: int):
 
 @app.post("/activity/{activity_id}/feedback")
 async def activity_feedback(request: Request, activity_id: int):
-    st: State = request.app.state.st
+    st = athlete(request)
     if not st.db.activity(activity_id):
         raise HTTPException(404)
     if not st.start_job("ride_feedback", st.do_ride_feedback(activity_id)):
@@ -373,7 +557,7 @@ async def plan_week_view(request: Request, week: str):
 
 @app.get("/plan")
 async def plan_view(request: Request, week: str | None = None, coach: str | None = None):
-    st: State = request.app.state.st
+    st = athlete(request)
     today = date.today()
     ws = date.fromisoformat(week) if week else stats.week_start(today)
     plans = {k or "": p for k, p in st.db.week_plans(ws.isoformat()).items()}
@@ -396,7 +580,7 @@ async def plan_view(request: Request, week: str | None = None, coach: str | None
     return render(request, "plan.html", plan=plan, plans=plans, coach=coach, tabs=tabs,
                   active_id=active["id"] if active else None, week=ws, prev=ws - timedelta(days=7),
                   next=ws + timedelta(days=7), today=today.isoformat(), status=status, by_day=by_day, tests=tests,
-                  applied_tests={t["date"] for t in st.cfg.ftp_tests},
+                  applied_tests={t["date"] for t in st.cfg.ftp_tests}, needs_profile=needs_profile(st),
                   zwift_uploads=st.db.get("zwift_uploads") or {})
 
 
@@ -413,14 +597,14 @@ def zwift_day(st: State, plan_id: int, day: str) -> tuple[dict, dict, str]:
 
 @app.get("/plan/{plan_id}/{day}.zwo")
 async def zwo(request: Request, plan_id: int, day: str):
-    _, d, xml = zwift_day(request.app.state.st, plan_id, day)
+    _, d, xml = zwift_day(athlete(request), plan_id, day)
     return Response(xml, media_type="application/xml",
                     headers={"Content-Disposition": f'attachment; filename="{workouts.filename(day, d["title"])}"'})
 
 
 @app.post("/plan/{plan_id}/{day}/zwift")
 async def zwift_upload(request: Request, plan_id: int, day: str):
-    st: State = request.app.state.st
+    st = athlete(request)
     plan, d, xml = zwift_day(st, plan_id, day)
     try:
         await st.zwift.upload_workout(workouts.filename(day, d["title"]), xml)
@@ -438,7 +622,7 @@ async def zwift_upload(request: Request, plan_id: int, day: str):
 
 @app.get("/analysis")
 async def analysis_view(request: Request, id: int | None = None):
-    st: State = request.app.state.st
+    st = athlete(request)
     a = st.db.analysis(id)
     html = render_md(a["markdown"]) if a else None
     return render(request, "analysis.html", a=a, html=html, history=st.db.analyses(),
@@ -447,7 +631,7 @@ async def analysis_view(request: Request, id: int | None = None):
 
 @app.post("/sync")
 async def sync_now(request: Request):
-    st: State = request.app.state.st
+    st = athlete(request)
     if st.strava.paused_until > time.time():
         until = datetime.fromtimestamp(st.strava.paused_until, timezone.utc).strftime("%H:%M")
         st.flash = ("ok", f"Strava's rate limit was reached. Sync resumes on its own at {until} UTC.")
@@ -456,10 +640,18 @@ async def sync_now(request: Request):
     return back(request, "/")
 
 
+def needs_profile(st: State) -> bool:
+    """A new athlete plans on defaults (days, hours, FTP) until they've saved their Profile once."""
+    return not st.is_owner and not st.db.get("profile_saved")
+
+
 @app.post("/plan")
 async def plan_now(request: Request, week: str | None = None):
-    st: State = request.app.state.st
+    st = athlete(request)
     ws = date.fromisoformat(week) if week else stats.week_start(date.today())
+    if needs_profile(st):
+        st.flash = ("error", "Fill in your Profile first: the coach plans around your days, hours and goals.")
+        return back(request, f"/plan?week={ws.isoformat()}")
     key = coaches.get((await request.form()).get("coach") or st.cfg.default_coach).key
     st.start_job("plan", st.do_plan(ws, key))
     return back(request, f"/plan?week={ws.isoformat()}&coach={key}")
@@ -467,7 +659,7 @@ async def plan_now(request: Request, week: str | None = None):
 
 @app.post("/plan/{plan_id}/activate")
 async def plan_activate(request: Request, plan_id: int):
-    st: State = request.app.state.st
+    st = athlete(request)
     plan = st.db.plan(plan_id)
     if not plan:
         raise HTTPException(404)
@@ -478,7 +670,7 @@ async def plan_activate(request: Request, plan_id: int):
 
 @app.get("/coach")
 async def coach_view(request: Request):
-    st: State = request.app.state.st
+    st = athlete(request)
     today = date.today()
     messages = st.db.chat(100)
     active = st.db.active_plan(stats.week_start(today).isoformat())
@@ -497,12 +689,12 @@ async def coach_view(request: Request):
 @app.get("/coach/status")
 async def coach_status(request: Request):
     """Polled by the chat page while the coach is typing, so it reloads once when the reply is in."""
-    return JSONResponse({"running": bool((request.app.state.st.jobs.get("chat") or {}).get("running"))})
+    return JSONResponse({"running": bool((athlete(request).jobs.get("chat") or {}).get("running"))})
 
 
 @app.post("/coach")
 async def coach_send(request: Request):
-    st: State = request.app.state.st
+    st = athlete(request)
     text = str((await request.form()).get("message", "")).strip()[:4000]
     if (st.jobs.get("chat") or {}).get("running"):
         st.flash = ("error", "The coach is still answering your last message. Send this one when the reply is in.")
@@ -514,7 +706,7 @@ async def coach_send(request: Request):
 
 @app.post("/coach/{msg_id}/apply")
 async def coach_apply(request: Request, msg_id: int):
-    st: State = request.app.state.st
+    st = athlete(request)
     msg = st.db.chat_message(msg_id)
     if not msg:
         raise HTTPException(404)
@@ -527,7 +719,7 @@ async def coach_apply(request: Request, msg_id: int):
 
 @app.post("/coach/clear")
 async def coach_clear(request: Request):
-    st: State = request.app.state.st
+    st = athlete(request)
     st.db.clear_chat()
     st.flash = ("ok", "Conversation cleared. Coach notes and memory are kept.")
     return back(request, "/coach")
@@ -535,14 +727,14 @@ async def coach_clear(request: Request):
 
 @app.post("/notes/{note_id}/delete")
 async def note_delete(request: Request, note_id: int):
-    st: State = request.app.state.st
+    st = athlete(request)
     st.db.delete_note(note_id, datetime.now().isoformat(timespec="seconds"))
     return back(request, "/profile" if (await request.form()).get("from") == "profile" else "/coach")
 
 
 @app.post("/memory/{memory_id}/delete")
 async def memory_delete(request: Request, memory_id: int):
-    st: State = request.app.state.st
+    st = athlete(request)
     st.db.forget_memory(memory_id, datetime.now().isoformat(timespec="seconds"))
     return back(request, "/profile")
 
@@ -550,7 +742,7 @@ async def memory_delete(request: Request, memory_id: int):
 @app.post("/ftp/apply")
 async def ftp_apply(request: Request):
     """Records a field test's FTP from the test date on. Rides before it keep the FTP they had."""
-    st: State = request.app.state.st
+    st = athlete(request)
     form = await request.form()
     try:
         ftp, day = int(str(form.get("ftp", ""))), date.fromisoformat(str(form.get("date", "")))
@@ -561,7 +753,7 @@ async def ftp_apply(request: Request):
     else:
         st.cfg.ftp_tests = [t for t in st.cfg.ftp_tests if t["date"] != day.isoformat()] + [
             {"date": day.isoformat(), "ftp": ftp, "protocol": str(form.get("protocol", ""))}]
-        save_config(st.db, st.cfg)
+        st.save()
         st.reload()
         recompute(st.db, st.cfg)
         st.start_job("publish", st.publish())  # MQTT round-trip: don't hold the redirect
@@ -573,9 +765,9 @@ async def ftp_apply(request: Request):
 
 @app.post("/ftp/tests/delete")
 async def ftp_test_delete(request: Request, date_: str = Query(alias="date")):
-    st: State = request.app.state.st
+    st = athlete(request)
     st.cfg.ftp_tests = [t for t in st.cfg.ftp_tests if t["date"] != date_]
-    save_config(st.db, st.cfg)
+    st.save()
     st.reload()
     recompute(st.db, st.cfg)
     st.start_job("publish", st.publish())  # MQTT round-trip: don't hold the redirect
@@ -585,7 +777,7 @@ async def ftp_test_delete(request: Request, date_: str = Query(alias="date")):
 
 @app.post("/analysis")
 async def analysis_now(request: Request):
-    st: State = request.app.state.st
+    st = athlete(request)
     st.start_job("analysis", st.do_analysis(coaches.get((await request.form()).get("coach") or st.cfg.default_coach).key))
     return back(request, "/analysis")
 
@@ -604,14 +796,30 @@ def valid_time(raw: str) -> bool:
         return False
 
 
-def apply_form(st: State, form) -> list[str]:
+def own_phone(name: str, raw: str, phones: list[str]) -> bool:
+    """An athlete's notify service and Apple Health sensors must be their own phone's."""
+    if name == "notify_service":
+        return raw in {f"notify.mobile_app_{p}" for p in phones}
+    return not name.startswith("health_") or raw in health.phone_sensors(phones)  # exact: iphone is a prefix of iphone_2
+
+
+def apply_form(st: State, form, phones: list[str] | None = None) -> list[str]:
     """Apply the config fields present in a submitted form and persist. Returns parse errors.
 
-    Fields missing from the form are untouched, so each page only changes its own settings.
+    Fields missing from the form are untouched, so each page only changes its own settings. `phones` is an
+    athlete's own devices (see State.phones); None for the owner.
     """
     cfg = st.cfg
     errors = []
     before = memory.tracked(cfg)
+    skip: set[str] = set()
+    if st.shared & set(STRAVA_APP) and any(str(form.get(k, "")).strip() for k in STRAVA_APP):
+        # Leaving the shared Strava app takes both fields: half of it would pair with the owner's other half (and save it)
+        if all(str(form.get(k, "")).strip() for k in STRAVA_APP):
+            st.shared.difference_update(STRAVA_APP)
+        else:
+            errors.append("Strava app: enter both the client ID and the secret of your own app")
+            skip.update(STRAVA_APP)
     for name, typ in FIELD_TYPES.items():
         if name == "available_days":
             if "availability" in form:  # only present when that section was submitted
@@ -621,9 +829,12 @@ def apply_form(st: State, form) -> list[str]:
             if form.get("_section") == "schedules":  # unticked checkboxes are absent from the form
                 setattr(cfg, name, name in form)
             continue
-        if name not in form:
+        if name not in form or name in skip or (name == "anthropic_api_key" and not st.is_owner):
             continue
         raw = str(form[name]).strip()
+        if phones is not None and raw and not own_phone(name, raw, phones):
+            errors.append(f"{name.replace('_', ' ')}: {raw} isn't from your phone")
+            continue
         if name in TIMES and raw and not valid_time(raw):
             errors.append(f"{name.replace('_', ' ')}: '{raw}' is not a time like 07:00")
             continue
@@ -636,9 +847,10 @@ def apply_form(st: State, form) -> list[str]:
             setattr(cfg, name, int(raw or 0) if typ == "int" else float(raw or 0) if typ == "float" else raw)
         except ValueError:
             errors.append(f"{name.replace('_', ' ')}: '{raw}' is not a number")
-    if form.get("clear_anthropic_api_key"):
+            continue
+    if form.get("clear_anthropic_api_key") and st.is_owner:
         cfg.anthropic_api_key = ""
-    save_config(st.db, cfg)
+    st.save()
     memory.log_changes(st.db, before, cfg, datetime.now().isoformat(timespec="seconds"))
     st.reload()
     return errors
@@ -646,7 +858,7 @@ def apply_form(st: State, form) -> list[str]:
 
 @app.get("/settings")
 async def settings_view(request: Request):
-    st: State = request.app.state.st
+    st = athlete(request)
     now = datetime.now()
     cfg = st.cfg
     week = stats.week_start(now.date()).isoformat()
@@ -667,27 +879,61 @@ async def settings_view(request: Request):
                      "next": next_run(now, cfg.auto_analysis_time, cfg.auto_analysis_day) if cfg.auto_analysis else None},
     }
     notify_options = await st.ha_cached("notify", ha.notify_services)
+    own = await st.phones()
+    if notify_options and own is not None:  # an athlete only sees their own phone
+        notify_options = [o for o in notify_options if own_phone("notify_service", o, own)]
     # A notify.* service HA doesn't have fails every send with a 400: say so, and offer the phone's own service
     notify_missing = bool(notify_options and cfg.notify_service.startswith("notify.") and cfg.notify_service not in notify_options)
     # Pre-filled only when unambiguous (the same name under mobile_app_, or the only phone), since saving the form saves it
     phones = [o for o in notify_options or [] if o.startswith("notify.mobile_app_")]
     same = "notify.mobile_app_" + cfg.notify_service.removeprefix("notify.")
     notify_suggest = (same if same in phones else phones[0] if len(phones) == 1 else None) if notify_missing else None
-    return render(request, "settings.html", cfg=st.cfg, athlete=st.db.get("strava_athlete"),
+    if own is not None and not cfg.notify_service and len(phones) == 1:
+        notify_suggest = phones[0]  # a new athlete with one phone
+    own_cfg = st.own_cfg()
+    return render(request, "settings.html", cfg=own_cfg, athlete=st.db.get("strava_athlete"), phones=own,
+                  shared_strava="strava_client_id" in st.shared, athletes=athletes_overview(request, now) if st.is_owner else None,
                   notify_options=notify_options, notify_missing=notify_missing, notify_suggest=notify_suggest,
                   usage=usage, schedule=schedule, last_feedback=(st.db.last_llm_call("ride") or "")[:16].replace("T", " "), sync_intervals=SYNC_INTERVALS, day_names=DAY_NAMES,
                   strava_app=st.strava.has_app, authorize_url=st.strava.authorize_url() if st.strava.has_app else None,
-                  redirect_uri=REDIRECT_URI, zwift_profile=st.db.get("zwift_profile"), has_secret={k: bool(getattr(st.cfg, k)) for k in SECRETS})
+                  redirect_uri=REDIRECT_URI, zwift_profile=st.db.get("zwift_profile"), has_secret={k: bool(getattr(own_cfg, k)) for k in SECRETS})
+
+
+def athletes_overview(request: Request, now: datetime) -> dict:
+    """For the owner's Settings: who's in, what their Claude calls cost this month, and who asked for access."""
+    reg: Athletes = request.app.state.athletes
+    month = now.strftime("%Y-%m-01")
+    rows = [{"uid": uid, "name": a["name"], "added": a["added"],
+             "cost": sum(u["cost"] for u in reg.others[uid].db.llm_usage(month, llm.cost).values()) if uid in reg.others else 0}
+            for uid, a in reg.listed().items()]
+    return {"rows": rows, "requests": reg.requests(),
+            "own_cost": sum(u["cost"] for u in reg.owner.db.llm_usage(month, llm.cost).values())}
+
+
+@app.post("/athletes/{uid}/{action}")
+async def athletes_action(request: Request, uid: str, action: str):
+    st = owner_only(request)
+    reg: Athletes = request.app.state.athletes
+    done = {"approve": reg.approve, "dismiss": reg.dismiss, "remove": reg.remove}.get(action)
+    if not done or not ATHLETE_ID.fullmatch(uid):
+        raise HTTPException(404)
+    name = done(uid)
+    st.flash = ("ok", {"approve": f"{name} can use Training Coach now.", "dismiss": f"{name}'s request dismissed.",
+                       "remove": f"{name} no longer has access. Their data is kept."}[action]) if name else (
+        "error", "That athlete or request is gone.")
+    return back(request, "/settings")
 
 
 @app.post("/settings")
 async def settings_save(request: Request):
-    st: State = request.app.state.st
+    st = athlete(request)
     old_key = st.cfg.anthropic_api_key
-    errors = apply_form(st, await request.form())
+    errors = apply_form(st, await request.form(), await st.phones())
+    if st.is_owner:
+        request.app.state.athletes.reload_shared()
     if errors:
         st.flash = ("error", "Saved, except: " + "; ".join(errors))
-    elif st.cfg.anthropic_api_key and st.cfg.anthropic_api_key != old_key:
+    elif st.is_owner and st.cfg.anthropic_api_key and st.cfg.anthropic_api_key != old_key:
         problem = await llm.check_key(st.cfg.anthropic_api_key)
         st.flash = ("error", f"Saved, but the Claude API key didn't work: {problem}") if problem else (
             "ok", "Saved. Claude API key verified.")
@@ -698,12 +944,12 @@ async def settings_save(request: Request):
 
 @app.get("/profile")
 async def profile_view(request: Request):
-    st: State = request.app.state.st
+    st = athlete(request)
     today = date.today()
     acts = st.db.activities(since_local=(today - timedelta(days=400)).isoformat())
     wkg = stats.dashboard(acts, today, st.cfg)["wkg"] if acts else None
     options = await st.health_options()
-    return render(request, "profile.html", cfg=st.cfg, weekdays=WEEKDAYS, levels=LEVELS, wkg=wkg,
+    return render(request, "profile.html", cfg=st.cfg, weekdays=WEEKDAYS, levels=LEVELS, wkg=wkg, phones=await st.phones(),
                   notes=st.db.active_notes(today.isoformat()), health_metrics=health.METRICS,
                   history=memory.history(st.db, st.cfg, datetime.now(), memory_ids=True),
                   health_latest=health.summary(st.db, today), health_options=options,
@@ -714,8 +960,9 @@ async def profile_view(request: Request):
 
 @app.post("/profile")
 async def profile_save(request: Request):
-    st: State = request.app.state.st
-    errors = apply_form(st, await request.form())
+    st = athlete(request)
+    errors = apply_form(st, await request.form(), await st.phones())
+    st.db.set("profile_saved", True)
     recompute(st.db, st.cfg)  # FTP override and LTHR change every ride's TSS
     st.start_job("publish", st.publish())  # MQTT round-trip: don't hold the redirect
     st.flash = ("error", "Saved, except: " + "; ".join(errors)) if errors else ("ok", "Profile saved.")
@@ -724,14 +971,14 @@ async def profile_save(request: Request):
 
 @app.post("/settings/strava/connect")
 async def strava_connect(request: Request):
-    st: State = request.app.state.st
+    st = athlete(request)
     pasted = str((await request.form()).get("redirect_url", ""))
     try:
-        athlete = await st.strava.exchange_code(pasted)
+        who = await st.strava.exchange_code(pasted)
     except (ValueError, KeyError) as e:
         st.flash = ("error", str(e))
         return back(request, "/settings")
-    st.flash = ("ok", f"Connected to Strava as {athlete.get('firstname', '')} {athlete.get('lastname', '')}. "
+    st.flash = ("ok", f"Connected to Strava as {who.get('firstname', '')} {who.get('lastname', '')}. "
                       "First sync started — it pulls 12 months of rides, power detail fills in over a few hours.")
     st.start_job("sync", st.do_sync())
     return back(request, "/settings")
@@ -739,7 +986,7 @@ async def strava_connect(request: Request):
 
 @app.post("/settings/strava/disconnect")
 async def strava_disconnect(request: Request):
-    st: State = request.app.state.st
+    st = athlete(request)
     st.strava.disconnect()
     st.flash = ("ok", "Strava disconnected. Your synced rides are kept.")
     return back(request, "/settings")
@@ -747,7 +994,7 @@ async def strava_disconnect(request: Request):
 
 @app.post("/settings/zwift/connect")
 async def zwift_connect(request: Request):
-    st: State = request.app.state.st
+    st = athlete(request)
     form = await request.form()
     try:
         profile = await st.zwift.connect(str(form.get("zwift_username", "")), str(form.get("zwift_password", "")))
@@ -762,7 +1009,7 @@ async def zwift_connect(request: Request):
 
 @app.post("/settings/zwift/disconnect")
 async def zwift_disconnect(request: Request):
-    st: State = request.app.state.st
+    st = athlete(request)
     st.zwift.disconnect()
     st.flash = ("ok", "Zwift disconnected. Workouts already sent stay in your Zwift account.")
     return back(request, "/settings")
