@@ -147,6 +147,8 @@
     <h3>Claude jobs</h3>
     <p class="hint-row">Ride feedback: <small class="hint">after every new ride, always on with a Claude API key{% if last_feedback %} · last: {{ last_feedback }}{% endif %}</small><br>
       <span class="muted">The coach's verdict goes in the notification for the ride. It's sent to the notify service above, so set that even if the morning time is empty.</span></p>
+    <p class="hint-row">Daily check-in: <small class="hint">the first time you open the add-on each day, always on with a Claude API key{% if last_checkin %} · last: {{ last_checkin }}{% endif %}</small><br>
+      <span class="muted">Your coach looks at yesterday, the plan and your recovery numbers and leaves a short message in the Coach chat.</span></p>
     <label class="inline"><input type="checkbox" name="auto_plan" {{ 'checked' if cfg.auto_plan }}> Plan next week automatically</label>
     <div class="grid2">
       <label>Day <select name="auto_plan_day">{% for k, n in day_names.items() %}<option value="{{ k }}" {{ 'selected' if k == cfg.auto_plan_day }}>{{ n }}</option>{% endfor %}</select></label>
@@ -174,7 +176,7 @@
   <table class="zones usage">
     <tr class="muted"><td>Call</td><td class="num">Calls</td><td class="num">Input</td><td class="num">Output</td><td class="num">Cost</td></tr>
     {% for purpose, u in rows.items() %}
-    <tr><td>{{ {'ride': 'Ride feedback'}.get(purpose, purpose | capitalize) }}<br><small class="muted">{{ u.models | map('replace', 'claude-', '') | join(', ') }}</small></td><td class="num">{{ u.calls }}</td>
+    <tr><td>{{ {'ride': 'Ride feedback', 'checkin': 'Daily check-in'}.get(purpose, purpose | capitalize) }}<br><small class="muted">{{ u.models | map('replace', 'claude-', '') | join(', ') }}</small></td><td class="num">{{ u.calls }}</td>
       <td class="num">{{ '{:,}'.format(u.input_tokens or 0) }}</td><td class="num">{{ '{:,}'.format(u.output_tokens or 0) }}</td>
       <td class="num">{{ '<$0.01' if 0 < u.cost < 0.005 else '$%.2f' % u.cost }}</td></tr>
     {% endfor %}

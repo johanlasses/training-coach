@@ -3,7 +3,8 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  {% set busy = jobs.values() | selectattr("running") | list %}
+  {#- The check-in shows as typing on the Coach page; it mustn't reload every other page while it runs -#}
+  {% set busy = jobs.items() | rejectattr("0", "equalto", "checkin") | map(attribute="1") | selectattr("running") | list %}
   {% if busy and page != 'coach' %}<meta http-equiv="refresh" content="5">{% endif %}
   <title>Training Coach</title>
   <link rel="stylesheet" href="{{ base }}/static/app.css">
@@ -14,7 +15,7 @@
   <nav>
     <a href="{{ base }}/" class="{{ 'active' if page == 'home' }}">Overview</a>
     <a href="{{ base }}/plan" class="{{ 'active' if page == 'plan' }}">Plan</a>
-    <a href="{{ base }}/coach" class="{{ 'active' if page == 'coach' }}">Coach</a>
+    <a href="{{ base }}/coach" class="{{ 'active' if page == 'coach' }}">Coach{% if checkin_unread and page != 'coach' %}<span class="nav-dot" role="img" aria-label="new check-in"></span>{% endif %}</a>
     <a href="{{ base }}/analysis" class="{{ 'active' if page == 'analysis' }}">Analysis</a>
     <a href="{{ base }}/profile" class="{{ 'active' if page == 'profile' }}">Profile</a>
     <a href="{{ base }}/settings" class="{{ 'active' if page == 'settings' }}">Settings</a>
@@ -32,7 +33,8 @@
   {% if not strava_ok and page != 'settings' %}
   <div class="notice error">Strava is not connected. <a href="{{ base }}/settings">Connect it in Settings</a>.</div>
   {% endif %}
-  {% for name, job in jobs.items() if job.error %}
+  {#- A failed check-in only shows on the Coach page: it's a nice-to-have, not worth a banner on every page all day -#}
+  {% for name, job in jobs.items() if job.error and name != 'checkin' %}
   <div class="notice error"><b>{{ name | capitalize }} failed:</b> {{ job.error }}</div>
   {% endfor %}
   {% block content %}{% endblock %}

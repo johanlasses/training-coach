@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.8.0 (2026-10-25)
+
+- **Your coach checks in every day.** The first time you open the add-on each day, your coach leaves a short,
+  friendly message in the **Coach** chat: what went well since the last check-in, and what today is about. Moving a
+  session to another day, getting back on the bike after a missed one, or riding today's session early all count.
+  A missed session gets no blame. If it matters for the week, an **Adjust my week** button under the message asks
+  the coach to rebalance the rest of the week, without cramming the missed work in. After a few missed days, or
+  when your recovery numbers are off, the coach asks how you're doing. The add-on syncs your rides first, so last
+  night's ride isn't counted as missed. A dot on the **Coach** tab shows a check-in you haven't read. It runs on Haiku
+  with your Claude key, about $0.001 a day.
+- **Readiness at a glance.** The Overview status card opens with small gauges: form, this week's TSS against the
+  plan (with a tick for where you should be by now), and HRV and sleep against your own baseline (resting HR shows
+  instead when that's the number that's off). The health gauges use the same thresholds the coach plans with, so
+  they never disagree with the plan.
+- The menu fits on smaller iPhones (SE and mini): "Settings" is no longer cut off.
+
 ## 0.7.0 (2026-10-25)
 
 - **Other people in your household can have their own Training Coach.** Every Home Assistant user gets their own

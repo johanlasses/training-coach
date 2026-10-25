@@ -35,8 +35,13 @@ Setup steps are in [training_coach/DOCS.md](training_coach/DOCS.md).
 - **Ride feedback** (`app/feedback.py`): after each sync, rides from the last 48 h get a Haiku-written verdict
   (planned vs actual per work segment, new bests, week so far, health) and a companion-app notification that opens
   the ride. Each ride is handled once (`activities.notified`).
+- **Daily check-in** (`app/checkin.py`): on the first page view of the day with a plan or a recent ride
+  (`State.maybe_checkin`, kv `checkin_tried`), Haiku writes a short message into the chat (`chat_messages.kind =
+  'checkin'`) from the days since the last check-in, this week, form, readiness and today's session.
 - **Overview status** (`app/overview.py`): form, week vs plan, CTL/FTP trend and the next event, from plain numbers.
-- **Models** (`llm.MODELS`): Opus for plan and analysis, Sonnet for chat, Haiku for ride feedback.
+  The gauges (`overview.gauges`) are server-rendered SVG; their health bands come from `health.READINESS`, the
+  thresholds `coach.HEALTH_RULES` is written from.
+- **Models** (`llm.MODELS`): Opus for plan and analysis, Sonnet for chat, Haiku for ride feedback and the check-in.
 - **Scheduler** (`State.scheduler` in `app/main.py`): a one-minute tick with configurable slots. Every Claude call is logged
   in `llm_calls` for the usage table.
 - **Athletes** (`Athletes`, `athlete()` in `app/main.py`): one `State` and SQLite DB per Home Assistant user, picked from

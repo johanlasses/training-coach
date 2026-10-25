@@ -165,11 +165,21 @@ db.add_chat(now, "assistant", "nextlevel", "Good to know. I've moved the quality
 db.add_note(now, "event", (today + timedelta(days=21)).isoformat(), (today + timedelta(days=21)).isoformat(),
             "B-race: 80 km gravel, wants to ride it well")
 db.add_note(now, "absence", (today + timedelta(days=2)).isoformat(), (today + timedelta(days=3)).isoformat(), "Work trip")
-for i in range(28):
+for i in range(35):  # a full 7-day week and 28-day baseline, so the Overview's readiness gauges show
     d = (today - timedelta(days=i)).isoformat()
     db.set_health(d, "rhr", 50 + random.randint(-2, 3), "bpm")
     db.set_health(d, "hrv", 58 + random.randint(-8, 8), "ms")
     db.set_health(d, "sleep", round(7 + random.uniform(-1, 0.8), 2), "h")
+
+db.set("settings", {"health_rhr_entity": "sensor.demo_iphone_resting_heart_rate",
+                    "health_hrv_entity": "sensor.demo_iphone_heart_rate_variability",
+                    "health_sleep_entity": "sensor.demo_iphone_sleep_duration"})
+db.add_chat(datetime.now().isoformat(timespec="seconds"), "assistant", "nextlevel", "Yesterday's endurance ride is in the bank, 62 TSS right on "
+            "plan, and three sessions in a row this week. Today is the sweet spot: start at the low end of the range, your sleep "
+            "was short again.", kind="checkin", ask="I missed Threshold 2×15. Can you adjust the rest of my week so it "
+            "still works, without cramming the missed session in?")
+db.set("checkin_tried", today.isoformat())
+db.set("checkin_day", today.isoformat())
 
 
 class _Usage:

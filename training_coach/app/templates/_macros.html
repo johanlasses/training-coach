@@ -73,3 +73,19 @@
   {% endif %}
 </a>
 {% endmacro %}
+
+{# A readiness gauge from overview.gauge(): banded arc with a marker, or a progress fill with a tick #}
+{% macro gauge(g) -%}
+<div class="gauge" role="img" aria-label="{{ g.label }}: {{ g.text }}, {{ g.sub }}">
+  <svg viewBox="0 0 100 58" aria-hidden="true">
+    <path d="{{ g.track }}" class="gauge-track"/>
+    {% for b in g.bands %}<path d="{{ b.d }}" class="gauge-band c-{{ b.colour }}"/>{% endfor %}
+    {% if g.fill %}<path d="{{ g.fill }}" class="gauge-fill c-{{ g.colour }}"/>{% endif %}
+    {% if g.tick %}<line x1="{{ g.tick[0] }}" y1="{{ g.tick[1] }}" x2="{{ g.tick[2] }}" y2="{{ g.tick[3] }}" class="gauge-tick"/>{% endif %}
+    {% if g.marker %}<circle cx="{{ g.marker[0] }}" cy="{{ g.marker[1] }}" r="6" class="gauge-marker c-{{ g.colour }}"/>{% endif %}
+    <text x="50" y="50" class="gauge-value">{{ g.text }}</text>
+  </svg>
+  <div class="gauge-label">{{ g.label }}</div>
+  <div class="gauge-sub">{{ g.sub }}</div>
+</div>
+{%- endmacro %}

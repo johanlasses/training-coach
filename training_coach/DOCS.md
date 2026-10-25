@@ -34,9 +34,15 @@ The first sync imports 12 months of rides. Power detail (NP, power curve, zones)
 
 ## Overview and ride feedback
 
-**Overview** opens with your status: form, this week against the plan (sessions done, TSS done of planned, the next
-session), fitness over the last 4 weeks (CTL and FTP change), and the countdown to the next event you told the coach
-about, with where CTL lands by then at the current ramp. Below it is your latest ride, then the five before it.
+**Overview** opens with your status. A row of small gauges comes first:
+- **Form**: TSB, coloured by the same bands the planner uses.
+- **Week**: TSS done against the plan. The tick marks where you'd be if you'd ridden every session up to today.
+- **HRV** and **Sleep**, or resting HR when there's no sleep data: your last 7 days against your own 28-day
+  baseline, coloured by the same readiness thresholds the coach plans with. They show once there's enough data
+  (5 days in the last week, 14 in the baseline).
+
+Below the gauges: this week's sessions and the next one, fitness over the last 4 weeks (CTL and FTP change), and
+the countdown to the next event you told the coach about, with where CTL lands by then at the current ramp. Below it is your latest ride, then the five before it.
 Older rides and the charts come after that.
 
 Rides with power are drawn like the planned sessions: blocks coloured by zone. When the ride was a planned Zwift
@@ -47,6 +53,19 @@ number that backs it up, and what's next. It reads your Apple Health trends too.
 title and 2–4 sentences, readable on the lock screen. Tap it to open the ride, where the longer version is.
 This runs whenever a Claude API key is set. It isn't a schedule: it's tied to a ride you just did. Only rides from
 the last 48 hours get one, so the first sync doesn't flood your phone. **Ask again** on a ride page writes it anew.
+
+**Daily check-in.** The first time you open the add-on each day, your coach leaves a short, friendly message in the
+**Coach** chat. Its job is to make you want to train, not to grade you:
+- It credits what you did since the last check-in, with a number. A session moved to another day, a ride the day
+  after a missed one, and today's session ridden early all count.
+- A missed session gets no guilt. If it matters for the week, tap **Adjust my week** under the message, and the coach
+  proposes a rebalanced week in the chat. It won't cram the missed work in, and you apply the proposal as usual.
+- After a few missed days in a row, or when your HRV, sleep or resting HR are off, it asks how you're doing.
+- If you've already ridden today, it doesn't tell you to ride again.
+
+The add-on syncs your rides first, so last night's ride isn't counted as missed. A dot on the **Coach** tab shows a
+check-in you haven't read. It needs a Claude API key, runs on Haiku (about $0.001 a day), and only when there's
+something to talk about: a plan this week or a ride in the last 7 days.
 
 ## Coach chat
 
@@ -128,6 +147,7 @@ You control all of it on **Settings → Schedules**. Claude jobs are off until y
 | Hourly | Read the Apple Health sensors from Home Assistant, if set up (local, free) |
 | Daily 07:00 | Push today's session to your notify service |
 | After each new ride | The coach's feedback, sent as a notification (needs a Claude API key; about $0.001 a ride) |
+| First visit each day | The coach's daily check-in in the chat (needs a Claude API key; about $0.001 a day) |
 | Off | Plan next week with your default coach (e.g. Sunday 20:00). Weeks that already have a plan are skipped |
 | Off | Weekly analysis (e.g. Monday 07:00) |
 
@@ -143,6 +163,7 @@ total.
 | Analysis | Opus 5.5, high effort | The deep read of your training; about once a week |
 | Coach chat | Sonnet 5.5, medium effort | Interactive, so it's faster. Plan edits are still checked and retried |
 | Ride feedback | Haiku 5.5 | The add-on computes the numbers; the model only judges and writes. It runs after every ride |
+| Daily check-in | Haiku 5.5 | Same idea as ride feedback: the numbers are computed, the model writes 2–4 sentences |
 
 ## Zwift workouts
 

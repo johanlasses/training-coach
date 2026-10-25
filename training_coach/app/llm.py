@@ -9,7 +9,8 @@ MODEL = "claude-opus-5-5"  # the key check and anything without its own entry be
 # Opus where the reasoning is the product and it runs about weekly: the plan (hard constraints, validated) and the
 # deep analysis. Sonnet for chat: interactive, plan edits are validated and retried. Haiku for the post-ride
 # feedback: a few sentences from numbers we compute, after every ride, so it's the high-volume call.
-MODELS = {"plan": MODEL, "analysis": MODEL, "chat": "claude-sonnet-5-5", "ride": "claude-haiku-5-5"}
+MODELS = {"plan": MODEL, "analysis": MODEL, "chat": "claude-sonnet-5-5", "ride": "claude-haiku-5-5",
+          "checkin": "claude-haiku-5-5"}
 # Haiku has no server-side refusal fallback
 FALLBACK_MODELS = {"claude-opus-5-5", "claude-sonnet-5-5"}
 # $ per million tokens: input, output, cache read. For the usage estimate on Settings.

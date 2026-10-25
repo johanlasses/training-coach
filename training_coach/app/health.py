@@ -29,6 +29,9 @@ METRICS = {
 # How the HA iOS app names each metric: sensor.<device>_<key>, e.g. sensor.johan_iphone_resting_heart_rate
 SENSOR_KEYS = {"rhr": "resting_heart_rate", "hrv": "heart_rate_variability", "sleep": "sleep_duration",
                "weight": "weight", "vo2max": "vo2_max"}
+# Readiness signals from the trends in summary(). The planner's rule text (coach.HEALTH_RULES), the daily check-in and the
+# Overview gauges all read these, so they never disagree.
+READINESS = {"min_days_7d": 5, "min_days_baseline": 14, "hrv_drop_pct": -10, "rhr_rise_bpm": 4, "sleep_min_h": 6.5}
 TO_HOURS = {"h": 1, "hr": 1, "hours": 1, "min": 1 / 60, "minutes": 1 / 60, "s": 1 / 3600}
 TO_KG = {"kg": 1, "lb": 0.45359237, "lbs": 0.45359237}
 
@@ -139,4 +142,23 @@ def summary(db: DB, today: date) -> dict:
             else:
                 item["change"] = round(mean(week) - mean(base), 1)
         out[metric] = item
+    return out
+
+
+def trusted(item: dict) -> bool:
+    """Enough days in the week and the baseline to read a trend from."""
+    return item["days_7d"] >= READINESS["min_days_7d"] and item["days_baseline"] >= READINESS["min_days_baseline"]
+
+
+def readiness(summ: dict) -> dict:
+    """Per metric of summary(): its trend and whether it's a readiness signal, by the planner's rule. Metrics without
+    enough data for the planner (trusted) are left out, so the gauges and the check-in never see what it ignores."""
+    out = {}
+    if (h := summ.get("hrv")) and trusted(h) and "change_pct" in h:
+        out["hrv"] = {"change_pct": h["change_pct"], "signal": h["change_pct"] <= READINESS["hrv_drop_pct"]}
+    if (r := summ.get("rhr")) and trusted(r) and "change" in r:
+        out["rhr"] = {"change": r["change"], "signal": r["change"] >= READINESS["rhr_rise_bpm"]}
+    if (s := summ.get("sleep")) and trusted(s) and s["mean_7d"] is not None:
+        out["sleep"] = {"mean_7d": s["mean_7d"], "baseline_mean": s["baseline_mean"],
+                        "signal": s["mean_7d"] < READINESS["sleep_min_h"]}
     return out

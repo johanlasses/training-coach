@@ -45,12 +45,21 @@ def section(title: str) -> None:
 
 
 def dbq(sql: str, *args, db: str = "/data/training.db") -> list[dict]:
-    """Query the add-on's SQLite file (the owner's, or `db`): copied out of the container so we never write to it."""
-    with tempfile.TemporaryDirectory() as d:
-        subprocess.run([*COMPOSE, "cp", f"addon:{db}", f"{d}/t.db"], check=True, capture_output=True)
-        conn = sqlite3.connect(f"{d}/t.db")
-        conn.row_factory = sqlite3.Row
-        return [dict(r) for r in conn.execute(sql, args)]
+    """Query the add-on's SQLite file (the owner's, or `db`): copied out of the container so we never write to it.
+    A copy taken mid-write can be torn ("malformed"); copy again."""
+    for attempt in range(5):
+        with tempfile.TemporaryDirectory() as d:
+            subprocess.run([*COMPOSE, "cp", f"addon:{db}", f"{d}/t.db"], check=True, capture_output=True)
+            conn = sqlite3.connect(f"{d}/t.db")
+            conn.row_factory = sqlite3.Row
+            try:
+                return [dict(r) for r in conn.execute(sql, args)]
+            except sqlite3.DatabaseError:
+                if attempt == 4:
+                    raise
+            finally:
+                conn.close()
+        time.sleep(1)
 
 
 def log_text() -> str:
@@ -187,7 +196,7 @@ def strava_sync() -> None:
     check(len(acts) >= 20, f"rides imported ({len(acts)})")
     check(all(a["streams_fetched"] and a["tss"] is not None and a["ftp_used"] for a in acts), "every ride has streams and is scored (TSS, FTP)")
     check(not job_errors("/"), "no job error banner after sync", str(job_errors("/")))
-    for p in PAGES + [f"/activity/{acts[-1]['id']}"]:
+    for p in [p for p in PAGES if p != "/coach"] + [f"/activity/{acts[-1]['id']}"]:  # /coach: in daily_checkin
         check(web.get(p).status_code == 200, f"GET {p} -> 200 with synced data")
 
 
@@ -236,6 +245,23 @@ def ride_feedback() -> None:
     haiku = [r for r in httpx.get(f"{ANTHROPIC}/_dev/requests").json() if r["model"] == "claude-haiku-5-5"]
     check(len(haiku) >= 1, "ride feedback used the Haiku model")
     check("hrv" in json.dumps(haiku[-1]["messages"]) if haiku else False, "Apple Health values reached the feedback prompt")
+
+
+def daily_checkin() -> None:
+    section("Daily check-in and Overview gauges")
+    page("/")  # the first page view with rides synced starts it
+    rows = wait(lambda: dbq("SELECT * FROM chat_messages WHERE kind='checkin'"), "the daily check-in", 60) or []
+    check(len(rows) == 1, "one check-in in the chat after the first page view with rides", str(job_errors("/")))
+    page("/plan")
+    check(len(dbq("SELECT id FROM chat_messages WHERE kind='checkin'")) == 1, "more page views don't start another one")
+    calls = dbq("SELECT model FROM llm_calls WHERE purpose='checkin'")
+    check([c["model"] for c in calls] == ["claude-haiku-5-5"], "the check-in runs on Haiku", str(calls))
+    check("nav-dot" in page("/"), "the Coach tab shows a dot while the check-in is unread")
+    c = page("/coach")
+    check("Daily check-in" in c and "Dev fake check-in" in c, "the Coach chat shows the check-in with its label")
+    check("nav-dot" not in page("/"), "opening the chat clears the dot")
+    home = page("/")
+    check('class="gauges"' in home and 'aria-label="Form:' in home, "the Overview status card shows the readiness gauges")
 
 
 def plan_and_modes() -> None:
@@ -418,6 +444,7 @@ def main() -> None:
     pages_and_urls()
     settings_and_profile()
     strava_sync()
+    daily_checkin()  # before any section opens /coach, which marks it read
     mqtt_sensors()
     stream_404()
     ride_feedback()

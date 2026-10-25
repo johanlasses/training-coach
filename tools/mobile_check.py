@@ -8,6 +8,7 @@ lie about mobile. This uses Playwright mobile emulation with the locally install
   .venv/bin/python tools/mobile_check.py /plan --light   # specific pages, light mode
   .venv/bin/python tools/mobile_check.py --desktop       # 1280 px browser window instead of an iPhone
   .venv/bin/python tools/mobile_check.py --desktop --width=1000   # e.g. inside HA's ingress frame
+  .venv/bin/python tools/mobile_check.py --width=375   # iPhone SE and mini
   .venv/bin/python tools/mobile_check.py / --screens=2   # only the first two screens, readable at full size
 
 Needs the app running (default http://localhost:8099, override with TC_URL). Exit code 1 on overflow.
@@ -51,11 +52,11 @@ def main() -> int:
         browser = p.chromium.launch(channel="chrome")
         desktop = "--desktop" in sys.argv
         device = "desktop" if desktop else "iphone"
+        width = next((int(a.split("=")[1]) for a in sys.argv if a.startswith("--width=")), 1280 if desktop else 390)
         if desktop:
-            width = next((int(a.split("=")[1]) for a in sys.argv if a.startswith("--width=")), 1280)
             page = browser.new_page(viewport={"width": width, "height": 900}, color_scheme=scheme)
-        else:
-            page = browser.new_page(viewport={"width": 390, "height": 844}, device_scale_factor=2,
+        else:  # 390: iPhone 12-16; --width=375 for the SE and the minis
+            page = browser.new_page(viewport={"width": width, "height": 844}, device_scale_factor=2,
                                     is_mobile=True, has_touch=True, color_scheme=scheme)
         for path in args or default_pages():
             page.goto(f"{BASE}{path}")

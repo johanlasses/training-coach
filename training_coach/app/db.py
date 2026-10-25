@@ -81,7 +81,9 @@ CREATE TABLE IF NOT EXISTS chat_messages (
     warnings TEXT,            -- JSON list, checks the proposal still fails
     notes TEXT,               -- JSON list of note texts saved with this reply
     applied_plan_id INTEGER,
-    remembered TEXT           -- JSON list of memory facts saved with this reply
+    remembered TEXT,          -- JSON list of memory facts saved with this reply
+    kind TEXT,                -- NULL for chat replies, checkin for the coach's daily check-in
+    ask TEXT                  -- a follow-up the athlete can send with one tap (the check-in's "Adjust my week")
 );
 CREATE TABLE IF NOT EXISTS coach_notes (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -137,7 +139,8 @@ class DB:
                 self.conn.execute(f"ALTER TABLE activities ADD COLUMN {col} {decl}")
                 if col == "notified":  # rides from before the upgrade were seen already: no pushes for them
                     self.conn.execute("UPDATE activities SET notified=1")
-        for table, col in (("coach_notes", "removed"), ("chat_messages", "remembered")):  # added in 0.6.0
+        for table, col in (("coach_notes", "removed"), ("chat_messages", "remembered"),  # added in 0.6.0
+                           ("chat_messages", "kind"), ("chat_messages", "ask")):  # added in 0.8.0
             if col not in {r["name"] for r in self.conn.execute(f"PRAGMA table_info({table})")}:
                 self.conn.execute(f"ALTER TABLE {table} ADD COLUMN {col} TEXT")
         self.conn.commit()
@@ -308,12 +311,13 @@ class DB:
 
     # --- chat and coach notes ----------------------------------------------
     def add_chat(self, ts: str, role: str, coach: str, content: str, proposal: dict | None = None,
-                 warnings: list[str] = (), notes: list[str] = (), remembered: list[str] = ()) -> int:
+                 warnings: list[str] = (), notes: list[str] = (), remembered: list[str] = (), kind: str | None = None,
+                 ask: str | None = None) -> int:
         cur = self.conn.execute(
-            "INSERT INTO chat_messages(ts, role, coach, content, proposal, warnings, notes, remembered) "
-            "VALUES(?,?,?,?,?,?,?,?)",
+            "INSERT INTO chat_messages(ts, role, coach, content, proposal, warnings, notes, remembered, kind, ask) "
+            "VALUES(?,?,?,?,?,?,?,?,?,?)",
             (ts, role, coach, content, json.dumps(proposal) if proposal else None, json.dumps(list(warnings)),
-             json.dumps(list(notes)), json.dumps(list(remembered))))
+             json.dumps(list(notes)), json.dumps(list(remembered)), kind, ask))
         self.conn.commit()
         return cur.lastrowid
 
@@ -321,6 +325,9 @@ class DB:
         """The last `limit` messages, oldest first."""
         rows = self.conn.execute("SELECT * FROM chat_messages ORDER BY id DESC LIMIT ?", (limit,)).fetchall()
         return [_chat(r) for r in reversed(rows)]
+
+    def last_chat_id(self, kind: str) -> int | None:
+        return self.conn.execute("SELECT MAX(id) FROM chat_messages WHERE kind=?", (kind,)).fetchone()[0]
 
     def chat_message(self, msg_id: int) -> dict | None:
         r = self.conn.execute("SELECT * FROM chat_messages WHERE id=?", (msg_id,)).fetchone()
@@ -349,6 +356,12 @@ class DB:
         """Notes that still matter: their end date is today or later, and nobody removed them."""
         rows = self.conn.execute("SELECT * FROM coach_notes WHERE end >= ? AND removed IS NULL ORDER BY start, id",
                                  (today,)).fetchall()
+        return [dict(r) for r in rows]
+
+    def notes_between(self, first: str, last: str) -> list[dict]:
+        """Notes whose dates overlap first..last, including ones removed after they started (they still applied)."""
+        rows = self.conn.execute("SELECT * FROM coach_notes WHERE start <= ? AND end >= ? AND (removed IS NULL OR "
+                                 "substr(removed, 1, 10) >= start) ORDER BY start, id", (last, first)).fetchall()
         return [dict(r) for r in rows]
 
     def past_notes(self, today: str, since: str, limit: int = 20) -> list[dict]:

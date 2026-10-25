@@ -18,7 +18,7 @@ from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Resp
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
-from . import analysis, chat, coaches, feedback, ftptest, ha, health, memory, overview, stats, workouts
+from . import analysis, chat, checkin, coaches, feedback, ftptest, ha, health, memory, overview, stats, workouts
 from . import coach as coach_mod
 from . import llm
 from .config import (DATA_DIR, FIELD_TYPES, LEVELS, SECRETS, SYNC_INTERVALS, WEEKDAYS, Config, level_for_wkg, load_config,
@@ -34,6 +34,7 @@ log = logging.getLogger("training_coach")
 HERE = Path(__file__).parent
 DUE_WINDOW = timedelta(hours=3)
 HEALTH_EVERY = timedelta(hours=1)  # a local HA read, no external API
+SYNC_RETRY = timedelta(minutes=10)  # a failed sync before the check-in: don't sync again on every page, check in anyway
 INGRESS_IP = "172.30.32.2"  # Supervisor on the hassio network: ingress requests come from here
 ATHLETE_ID = re.compile(r"[A-Za-z0-9_-]{1,64}")  # HA user ids are uuid hex; also a folder name, so nothing else
 STRAVA_APP = ("strava_client_id", "strava_client_secret")
@@ -118,7 +119,12 @@ class State:
     async def do_sync(self) -> None:
         if not self.strava.configured:
             raise RuntimeError("Strava is not connected — see Settings")
-        await sync(self.db, self.strava, self.cfg)
+        try:
+            await sync(self.db, self.strava, self.cfg)
+        finally:
+            if getattr(self, "checkin_after_sync", False):  # waiting for this sync; with stale data if it failed
+                self.checkin_after_sync = False
+                self.maybe_checkin(synced=True)
         await self.publish()
         # New rides get the coach's feedback and a notification. Its own job, so the sync shows done right away.
         if self.db.activities_to_notify((datetime.now(timezone.utc) - feedback.WINDOW).strftime("%Y-%m-%dT%H:%M:%SZ")):
@@ -186,6 +192,36 @@ class State:
             return health.candidates(states, phones) if states else None
         return await self.ha_cached("health", read)
 
+    def maybe_checkin(self, synced: bool = False) -> None:
+        """The coach's daily check-in, on the first page view of the day with something to talk about (so a new athlete
+        gets one after their first sync). Rides must be in first, or last night's ride reads as missed: while a sync runs
+        or the last one is stale, it syncs and the check-in follows the sync. Tried once a day: a failure doesn't retry
+        on every page."""
+        today = date.today()
+        if not self.cfg.anthropic_api_key or self.db.get("checkin_tried") == today.isoformat():
+            return
+        utc = datetime.now(timezone.utc)
+        if not synced and (self.jobs.get("sync") or {}).get("running"):
+            self.checkin_after_sync = True
+            return
+        if not synced and self.strava.configured and self.sync_stale(utc) and not (
+                self.sync_tried and utc - self.sync_tried < SYNC_RETRY):
+            self.sync_tried, self.checkin_after_sync = utc, True
+            self.start_job("sync", self.do_sync())
+            return
+        if checkin.worth_it(self.db, self.db.activities(since_local=(today - timedelta(days=checkin.LOOKBACK_DAYS)).isoformat()), today):
+            self.db.set("checkin_tried", today.isoformat())
+            self.start_job("checkin", checkin.generate(self.db, self.cfg, today))
+
+    def sync_stale(self, utc: datetime) -> bool:
+        """The last sync is older than the sync interval (an hour when scheduled syncs are off)."""
+        last = self.db.get("last_sync")
+        return not last or utc - datetime.fromisoformat(last["at"]) > timedelta(minutes=self.cfg.sync_interval_min or 60)
+
+    def checkin_unread(self) -> bool:
+        last = self.db.last_chat_id("checkin")
+        return bool(last) and last > (self.db.get("checkin_seen") or 0)
+
     async def do_chat(self) -> None:
         await chat.respond(self.db, self.cfg, self.snapshot(), date.today())
 
@@ -201,7 +237,7 @@ class State:
             return
         today = date.today()
         d = stats.dashboard(self.db.activities(since_local=(today - timedelta(days=400)).isoformat()), today, self.cfg)
-        session = today_session(self.db, today)
+        session = overview.today_session(self.db, today)
         last = next(iter(self.db.activities(limit=1)), None)
         await ha.publish_sensors({
             "ftp": d["ftp"], "wkg": d["wkg"], "ctl": d["ctl"], "atl": d["atl"], "tsb": d["tsb"],
@@ -272,7 +308,7 @@ class State:
                     self.start_job("health", health.fetch(self.db, cfg, now.date()))
                 if cfg.notify_service and self.due("notified", now, cfg.notify_time):
                     self.ran("notified", now)
-                    s = today_session(self.db, now.date())
+                    s = overview.today_session(self.db, now.date())
                     if s:
                         await ha.notify(cfg.notify_service, f"Today: {s['title']}",
                                         f"{s['duration_min']} min · {s['description'][:180]}", ha.tap("/plan", "today"))
@@ -310,13 +346,6 @@ def planned_by_date(db: DB, acts: list[dict]) -> dict[str, dict]:
             if d["kind"] != "rest":
                 out[d["date"]] = d
     return out
-
-
-def today_session(db: DB, today: date) -> dict | None:
-    plan = db.active_plan(stats.week_start(today).isoformat())
-    if not plan:
-        return None
-    return next((d for d in plan["payload"]["days"] if d["date"] == today.isoformat() and d["kind"] != "rest"), None)
 
 
 class NoAccess(Exception):
@@ -494,11 +523,13 @@ def base(request: Request) -> str:
 
 def render(request: Request, name: str, **ctx) -> Response:
     st = athlete(request)
+    st.maybe_checkin()
     flash, st.flash = st.flash, None
     return templates.TemplateResponse(request, name, {
         "base": base(request), "jobs": st.jobs, "last_sync": st.db.get("last_sync"), "flash": flash,
         "is_owner": st.is_owner, "owner_name": (st.owner.name if st.owner else st.name) or "the owner",
-        "strava_ok": st.strava.configured, "zwift_ok": st.zwift.configured, "ai_ok": bool(st.cfg.anthropic_api_key), **ctx})
+        "strava_ok": st.strava.configured, "zwift_ok": st.zwift.configured, "ai_ok": bool(st.cfg.anthropic_api_key),
+        "checkin_unread": st.checkin_unread(), **ctx})
 
 
 def render_md(text: str) -> str:
@@ -518,7 +549,9 @@ async def home(request: Request):
     acts = st.db.activities(since_local=(today - timedelta(days=400)).isoformat())
     d = stats.dashboard(acts, today, st.cfg)
     feed = acts[:20]
-    return render(request, "home.html", d=d, status=overview.status(st.db, st.cfg, acts, today, d),
+    status = overview.status(st.db, st.cfg, acts, today, d)
+    ready = health.readiness(health.summary(st.db, today)) if health.entities(st.cfg) else None
+    return render(request, "home.html", d=d, status=status, gauges=overview.gauges(status, ready),
                   latest=feed[0] if feed else None, feed=feed[1:], planned=planned_by_date(st.db, feed),
                   feedback_running=(st.jobs.get("feedback") or {}).get("running"))
 
@@ -673,6 +706,8 @@ async def coach_view(request: Request):
     st = athlete(request)
     today = date.today()
     messages = st.db.chat(100)
+    if last := st.db.last_chat_id("checkin"):
+        st.db.set("checkin_seen", last)
     active = st.db.active_plan(stats.week_start(today).isoformat())
     for m in messages:  # old → new title per changed day, for the proposal diff
         if m["proposal"]:
@@ -689,7 +724,8 @@ async def coach_view(request: Request):
 @app.get("/coach/status")
 async def coach_status(request: Request):
     """Polled by the chat page while the coach is typing, so it reloads once when the reply is in."""
-    return JSONResponse({"running": bool((athlete(request).jobs.get("chat") or {}).get("running"))})
+    jobs = athlete(request).jobs
+    return JSONResponse({"running": any((jobs.get(k) or {}).get("running") for k in ("chat", "checkin"))})
 
 
 @app.post("/coach")
@@ -894,7 +930,8 @@ async def settings_view(request: Request):
     return render(request, "settings.html", cfg=own_cfg, athlete=st.db.get("strava_athlete"), phones=own,
                   shared_strava="strava_client_id" in st.shared, athletes=athletes_overview(request, now) if st.is_owner else None,
                   notify_options=notify_options, notify_missing=notify_missing, notify_suggest=notify_suggest,
-                  usage=usage, schedule=schedule, last_feedback=(st.db.last_llm_call("ride") or "")[:16].replace("T", " "), sync_intervals=SYNC_INTERVALS, day_names=DAY_NAMES,
+                  usage=usage, schedule=schedule, last_feedback=(st.db.last_llm_call("ride") or "")[:16].replace("T", " "),
+                  last_checkin=(st.db.last_llm_call("checkin") or "")[:16].replace("T", " "), sync_intervals=SYNC_INTERVALS, day_names=DAY_NAMES,
                   strava_app=st.strava.has_app, authorize_url=st.strava.authorize_url() if st.strava.has_app else None,
                   redirect_uri=REDIRECT_URI, zwift_profile=st.db.get("zwift_profile"), has_secret={k: bool(getattr(own_cfg, k)) for k in SECRETS})
 

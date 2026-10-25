@@ -1,4 +1,4 @@
-"""Fake Anthropic Messages API: streams schema-valid replies for plan, chat, ride feedback and analysis.
+"""Fake Anthropic Messages API: streams schema-valid replies for plan, chat, ride feedback, the daily check-in and analysis.
 
 The purpose is read from the requested JSON schema. /_dev/mode switches failure behaviour, /_dev/requests shows
 what the app sent (to check what reached the prompt)."""
@@ -89,6 +89,8 @@ def reply_for(body: dict) -> str:
         return json.dumps(chat_reply(messages))
     if "headline" in props:
         return json.dumps(feedback_reply())
+    if list(props) == ["message"]:
+        return json.dumps({"message": "Dev fake check-in: yesterday is in the bank. Today, ride it as planned."})
     return "# Analysis (dev fake)\n\nVolume and intensity look reasonable.\n\n## Recommendations\n- Keep the easy days easy.\n"
 
 

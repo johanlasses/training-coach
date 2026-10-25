@@ -2,6 +2,7 @@
 pythonpath = ["training_coach"]
 testpaths = ["tests"]
 asyncio_mode = "auto"
+markers = ["real_checkin: let page views start the daily check-in (tests/conftest.py stubs it otherwise)"]
 
 [tool.ruff]
 line-length = 120

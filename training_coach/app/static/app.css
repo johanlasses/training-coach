@@ -156,6 +156,31 @@ details.data th:first-child, details.data td:first-child { text-align: left; }
 .delta { font-size: 15px; font-weight: 600; color: var(--text-muted); }
 .delta.up { color: var(--success-text); }
 .delta.down { color: var(--critical); }
+.gauges { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; margin-bottom: 14px;
+  padding-bottom: 12px; border-bottom: 1px solid var(--border); max-width: 560px; }
+.gauge { text-align: center; min-width: 0; }
+.gauge svg { width: 100%; max-width: 110px; display: block; margin: 0 auto; }
+.gauge path { fill: none; stroke-linecap: round; }
+.gauge-track { stroke: var(--grid); stroke-width: 8; }
+.gauge-band { stroke-width: 8; opacity: .45; stroke-linecap: butt; }
+.gauge-fill { stroke-width: 8; }
+.gauge-tick { stroke: var(--text-primary); stroke-width: 2; }
+.gauge-marker { stroke: var(--surface-1); stroke-width: 2.5; }
+/* Colour tokens as classes: var() inside SVG presentation attributes isn't safe on every WebKit */
+.gauge .c-critical { stroke: var(--critical); } .gauge-marker.c-critical { fill: var(--critical); }
+.gauge .c-warning { stroke: var(--warning); } .gauge-marker.c-warning { fill: var(--warning); }
+.gauge .c-good { stroke: var(--good); } .gauge-marker.c-good { fill: var(--good); }
+.gauge .c-div-pos { stroke: var(--div-pos); } .gauge-marker.c-div-pos { fill: var(--div-pos); }
+.gauge .c-text-muted { stroke: var(--text-muted); } .gauge-marker.c-text-muted { fill: var(--text-muted); }
+.gauge .c-series-1 { stroke: var(--series-1); } .gauge-marker.c-series-1 { fill: var(--series-1); }
+.gauge .gauge-marker { stroke: var(--surface-1); }  /* after the colour classes: the ring stays the card colour */
+.gauge-value { font-size: 17px; font-weight: 600; text-anchor: middle; fill: var(--text-primary); }
+.gauge-label { font-size: 12px; color: var(--text-secondary); text-transform: uppercase; letter-spacing: .04em; }
+.gauge-sub { font-size: 12px; color: var(--text-muted); line-height: 1.3; overflow-wrap: anywhere; }
+@media (max-width: 360px) { .gauges { grid-template-columns: repeat(2, minmax(0, 1fr)); row-gap: 12px; } }
+.msg-ask { margin-top: 8px; }
+nav a { position: relative; }
+.nav-dot { position: absolute; top: 7px; right: -7px; width: 7px; height: 7px; border-radius: 50%; background: var(--accent); }
 .meter { height: 6px; border-radius: 3px; background: var(--grid); margin: 6px 0 4px; overflow: hidden; }
 .meter span { display: block; height: 100%; background: var(--series-1); border-radius: 3px; }
 @media (max-width: 700px) {
@@ -331,8 +356,8 @@ body.page-coach { height: 100vh; height: 100dvh; display: flex; flex-direction: 
   header h1 { font-size: 16px; }
   .status { order: 2; }
   .status > span { display: none; }  /* sync time doesn't fit; the button stays */
-  nav { order: 3; width: 100%; display: flex; overflow-x: auto; white-space: nowrap; }
-  nav a { padding: 8px 0; }
+  nav { order: 3; width: 100%; display: flex; justify-content: space-between; gap: 8px; overflow-x: auto; white-space: nowrap; }
+  nav a { padding: 8px 0; margin-right: 0; }
   main { padding: 16px; }
   .report { padding: 4px 16px 12px; }
   .report ul, .report ol { padding-left: 20px; }

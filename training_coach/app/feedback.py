@@ -12,7 +12,7 @@ from datetime import date, datetime, timedelta, timezone
 from statistics import StatisticsError, correlation, median
 
 from . import coaches, ha, health, llm, memory, metrics, overview, stats, workouts
-from .coach import HEALTH_RULES, compliance
+from .coach import HEALTH_RULES
 from .config import Config
 from .db import DB
 
@@ -200,13 +200,8 @@ def context(db: DB, cfg: Config, a: dict) -> tuple[dict, coaches.Coach]:
     bests = new_bests(a, acts)
     week = []
     if plan:
-        sessions = [p for p in plan["payload"]["days"] if p["kind"] != "rest"]
-        week_acts = [x for x in acts if x["start_date_local"][:10] >= plan["week_start"]]
-        for p in plan["payload"]["days"]:
-            if p["date"] <= day.isoformat():
-                week.append({"date": p["date"], "planned": p["title"] if p["kind"] != "rest" else "Rest",
-                             "status": compliance(p, overview.rides_for(p, sessions, week_acts) if p["kind"] != "rest"
-                                                  else [x for x in week_acts if x["start_date_local"][:10] == p["date"]])})
+        week = [{"date": p["date"], "planned": p["title"] if p["kind"] != "rest" else "Rest", "status": status}
+                for p, status in overview.day_statuses(plan, acts, day.isoformat())]
         upcoming = [p for p in plan["payload"]["days"] if p["date"] > day.isoformat()]
         nxt = next((p for p in upcoming if p["kind"] != "rest"), None)
     else:

@@ -57,6 +57,10 @@ them to generate a plan on the Plan tab first.
 event or race (event: put the distance, type and how much it matters in the text), an injury or illness, or a \
 lasting constraint (other). Resolve dates like "next Friday" from snapshot.today. Don't save what is already \
 in the notes, and don't save things that only change this week's plan.
+- Missed sessions are normal for an amateur with a job and a life: the plan is a guide, not a contract. When they \
+ask you to adjust after a miss, rebalance the remaining open days realistically: keep the week's most important \
+session if it still fits with a rest or easy day around it, drop or shorten the rest, and never cram the missed work \
+in or add volume to catch up. Be encouraging about it.
 - remove_note_ids: notes the athlete says no longer apply.
 - remember: lasting facts about the athlete that will still matter in months and that the profile doesn't hold: \
 background and earlier training, what has or hasn't worked for them, preferences (indoor or outdoor, sessions they \
@@ -146,6 +150,8 @@ async def respond(db: DB, cfg: Config, snapshot: dict, today: date) -> int:
     messages = []
     for m in history[:-1]:
         text = m["content"]
+        if m.get("kind") == "checkin":
+            text = f"[Your daily check-in]\n{text}"
         if m["role"] == "assistant" and m["coach"] != c.key:
             text = f"[Earlier coach: {coaches.name_of(m['coach'])}]\n{text}"
         if m["role"] == "assistant" and m["proposal"]:
