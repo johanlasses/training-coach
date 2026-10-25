@@ -69,7 +69,8 @@
       "Bash(dev/devha.sh health)",
       "Bash(TC_DATA_DIR=/tmp/tc-demo .venv/bin/python tools/seed_demo.py)",
       "Bash(.venv/bin/ruff check *)",
-      "Bash(pkill -f \"uvicorn app.main:app\")"
+      "Bash(pkill -f \"uvicorn app.main:app\")",
+      "Bash(uv pip install --python .venv/bin/python *)"
     ]
   }
 }

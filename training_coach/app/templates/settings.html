@@ -49,75 +49,34 @@
 {% endif %}
 
 <section class="card">
-  <h2>Strava</h2>
-  {% if athlete and strava_ok %}
-    <p>✓ Connected as <b>{{ athlete.firstname }} {{ athlete.lastname }}</b>.</p>
-    <form method="post" action="{{ base }}/settings/strava/disconnect"><button class="secondary">Disconnect</button></form>
-  {% else %}
-  <ol class="steps-list">
-    {% if shared_strava %}
-    <li>
-      <p>Connect your own Strava account below. It goes through {{ owner_name }}'s Strava API app, so there's nothing to set up.</p>
-      <details><summary class="muted">Use your own Strava API app instead (optional)</summary>
-      <p>Create one at <a href="https://www.strava.com/settings/api" target="_blank" rel="noopener">strava.com/settings/api</a>
-        with <b>Authorization Callback Domain</b> <code>localhost</code>, then enter it here.</p>
-      <form method="post" action="{{ base }}/settings">
-        <div class="grid2">
-          <label>Client ID <input name="strava_client_id" inputmode="numeric"></label>
-          <label>Client secret <input type="password" name="strava_client_secret" autocomplete="off"></label>
-        </div>
-        <button class="secondary">Save</button>
-      </form>
-      </details>
-    </li>
-    {% else %}
-    <li>
-      <p>Create an API application at <a href="https://www.strava.com/settings/api" target="_blank" rel="noopener">strava.com/settings/api</a>.
-        Set <b>Authorization Callback Domain</b> to <code>localhost</code>. Any name, website and icon will do.</p>
-      <form method="post" action="{{ base }}/settings">
-        <div class="grid2">
-          <label>Client ID <input name="strava_client_id" value="{{ cfg.strava_client_id }}" inputmode="numeric"></label>
-          <label>Client secret <input type="password" name="strava_client_secret" autocomplete="off"
-                 placeholder="{{ '•••••••• stored — leave blank to keep' if has_secret.strava_client_secret else '' }}"></label>
-        </div>
-        <button class="secondary">Save</button>
-      </form>
-    </li>
-    {% endif %}
-    <li class="{{ 'disabled' if not strava_app }}">
-      <p>Approve access on Strava. Tick every box.</p>
-      {% if authorize_url %}<a class="btn" href="{{ authorize_url }}" target="_blank" rel="noopener">Connect with Strava</a>
-      {% else %}<button disabled>Connect with Strava</button>{% endif %}
-    </li>
-    <li class="{{ 'disabled' if not strava_app }}">
-      <p>Strava then sends you to a page that <b>won't load</b> (<code>{{ redirect_uri }}?…</code>). That's expected:
-        copy the full address from the browser's address bar and paste it here.</p>
-      <form method="post" action="{{ base }}/settings/strava/connect" class="row">
-        <input name="redirect_url" placeholder="{{ redirect_uri }}?state=&code=…&scope=…" {{ 'disabled' if not strava_app }} required>
-        <button {{ 'disabled' if not strava_app }}>Finish connecting</button>
-      </form>
-    </li>
-  </ol>
-  {% endif %}
-</section>
-
-<section class="card">
-  <h2>Zwift</h2>
-  {% if zwift_ok and zwift_profile %}
-    <p>✓ Connected as <b>{{ zwift_profile.firstName }} {{ zwift_profile.lastName }}</b>. Zwift sessions on the
-      Plan page have a <b>Send to Zwift</b> button.</p>
-    <form method="post" action="{{ base }}/settings/zwift/disconnect"><button class="secondary">Disconnect</button></form>
-  {% else %}
-  <p class="caption">Sends the coach's Zwift sessions straight to your Custom Workouts, with the coach's
-    on-screen messages. Zwift has no public API for this, so the add-on signs in like the Zwift app does.
-    Your password is used once to sign in and is <b>not stored</b>. Only the login session is kept.
-    {% if zwift_profile %}<br><b>The Zwift login has expired. Sign in again.</b>{% endif %}</p>
-  <form method="post" action="{{ base }}/settings/zwift/connect">
+  <h2>Strava API app</h2>
+  {% if shared_strava %}
+  <p class="caption">Your Strava sign-in goes through {{ owner_name }}'s Strava API app, so there's nothing to set up.
+    Connect your Strava account on <a href="{{ base }}/profile#connections">Profile</a>.</p>
+  <details><summary class="muted">Use your own Strava API app instead (optional)</summary>
+  <p>Create one at <a href="https://www.strava.com/settings/api" target="_blank" rel="noopener">strava.com/settings/api</a>
+    with <b>Authorization Callback Domain</b> <code>localhost</code>, then enter it here.</p>
+  <form method="post" action="{{ base }}/settings">
     <div class="grid2">
-      <label>Zwift email <input type="email" name="zwift_username" autocomplete="username" required></label>
-      <label>Password <input type="password" name="zwift_password" autocomplete="current-password" required></label>
+      <label>Client ID <input name="strava_client_id" inputmode="numeric"></label>
+      <label>Client secret <input type="password" name="strava_client_secret" autocomplete="off"></label>
     </div>
-    <button>Connect Zwift</button>
+    <button class="secondary">Save</button>
+  </form>
+  </details>
+  {% else %}
+  <p class="caption">Strava only lets apps sign people in through an API application of your own{% if is_owner %}. Every
+    athlete who picks Strava on Profile signs in through it{% endif %}. Create one at
+    <a href="https://www.strava.com/settings/api" target="_blank" rel="noopener">strava.com/settings/api</a> and set
+    <b>Authorization Callback Domain</b> to <code>localhost</code>. Any name, website and icon will do. Then connect
+    your account on <a href="{{ base }}/profile#connections">Profile</a>.</p>
+  <form method="post" action="{{ base }}/settings">
+    <div class="grid2">
+      <label>Client ID <input name="strava_client_id" value="{{ cfg.strava_client_id }}" inputmode="numeric"></label>
+      <label>Client secret <input type="password" name="strava_client_secret" autocomplete="off"
+             placeholder="{{ '•••••••• stored — leave blank to keep' if has_secret.strava_client_secret else '' }}"></label>
+    </div>
+    <button class="secondary">Save</button>
   </form>
   {% endif %}
 </section>
@@ -128,11 +87,11 @@
   <p class="caption">Everything the add-on does on its own. Claude jobs cost tokens and are off until you switch them on.</p>
   <form method="post" action="{{ base }}/settings">
     <input type="hidden" name="_section" value="schedules">
-    <label>Strava sync <select name="sync_interval_min">
+    <label>{{ source_name }} sync <select name="sync_interval_min">
       {% for mins, label in sync_intervals.items() %}<option value="{{ mins }}" {{ 'selected' if mins == cfg.sync_interval_min }}>{{ label }}</option>{% endfor %}
       </select>{{ when(schedule.sync) }}</label>
     <label class="inline"><input type="checkbox" name="zwift_refresh" {{ 'checked' if cfg.zwift_refresh }}> Daily Zwift login refresh {{ when(schedule.zwift) }}</label>
-    <p class="hint-row">Apple Health from Home Assistant: {{ when(schedule.health) }} <span class="muted">(local, set up on Profile)</span></p>
+    <p class="hint-row">Health data: {{ when(schedule.health) }} <span class="muted">(set up on Profile)</span></p>
     <h3>Notifications</h3>
     <datalist id="notify-services">{% for o in notify_options or [] %}<option value="{{ o }}">{% endfor %}</datalist>
     <div class="grid2 wide-first">

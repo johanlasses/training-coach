@@ -10,6 +10,10 @@ outside, and the current goal is general fitness and FTP gain in 4-week blocks.
 
 Scope: the diff you are given, or `git diff` against `HEAD` if none. Read the surrounding code in `training_coach/app/`.
 
+Tools: you start in the repo root. Read files with Read, search with Grep/Glob. Use Bash only for `git` (e.g.
+`rtk git diff`) and the project's test commands, one plain command per call: no `cd`, no `;`/`&&` chains, no `sed`,
+`cat` or `head` (each of those asks the user for approval).
+
 Check, with concrete reasoning:
 - **Load math** (`metrics.py`): NP (30 s rolling, 4th-power mean), IF, TSS = s·NP·IF/(FTP·3600)·100, hrTSS approximation,
   CTL/ATL as 42/7-day exponentially weighted averages, TSB defined as the previous day's CTL−ATL, eFTP rules, the CP/W′ fit,

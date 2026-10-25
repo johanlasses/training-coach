@@ -25,13 +25,13 @@
     {% elif last_sync %}<span title="{{ last_sync.listed }} rides listed, {{ last_sync.pending_streams }} awaiting power data">
       Synced {{ last_sync.at[:16] | replace('T', ' ') }} UTC{% if last_sync.rate_limited %} · {{ last_sync.rate_limited }}{% elif last_sync.pending_streams %} · {{ last_sync.pending_streams }} rides still loading{% endif %}</span>
     {% endif %}
-    <form method="post" action="{{ base }}/sync"><button class="secondary" {{ 'disabled' if not strava_ok or (jobs.sync and jobs.sync.running) }}>Sync now</button></form>
+    <form method="post" action="{{ base }}/sync"><button class="secondary" {{ 'disabled' if not source_ok or (jobs.sync and jobs.sync.running) }}>Sync now</button></form>
   </div>
 </header>
 <main>
   {% if flash %}<div class="notice {{ 'error' if flash[0] == 'error' }}">{{ flash[1] }}</div>{% endif %}
-  {% if not strava_ok and page != 'settings' %}
-  <div class="notice error">Strava is not connected. <a href="{{ base }}/settings">Connect it in Settings</a>.</div>
+  {% if not source_ok and page != 'profile' %}
+  <div class="notice error">{{ source_name }} is not connected. <a href="{{ base }}/profile#connections">Connect it on Profile</a>.</div>
   {% endif %}
   {#- A failed check-in only shows on the Coach page: it's a nice-to-have, not worth a banner on every page all day -#}
   {% for name, job in jobs.items() if job.error and name != 'checkin' %}

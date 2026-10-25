@@ -13,7 +13,7 @@ from statistics import StatisticsError, correlation, median
 
 from . import coaches, ha, health, llm, memory, metrics, overview, stats, workouts
 from .coach import HEALTH_RULES
-from .config import Config
+from .config import HEALTH_SOURCES, Config
 from .db import DB
 
 log = logging.getLogger(__name__)
@@ -40,7 +40,7 @@ SCHEMA = {
 SYSTEM = """You are {coach}, coaching one amateur road and gravel cyclist. They just finished a ride and you \
 give feedback on it. You get a JSON with the ride, the session you planned for that day (if any), the work \
 segments of a planned Zwift workout with target and actual watts, the week so far, their form, their goals and, \
-when present, Apple Health readiness data (health).
+when present, readiness data from Apple Health or Garmin (health, health_source).
 
 Write three things:
 - headline: the verdict in under 50 characters, e.g. "Sweet spot nailed, last rep faded". It's the title of \
@@ -229,8 +229,8 @@ def context(db: DB, cfg: Config, a: dict) -> tuple[dict, coaches.Coach]:
     }
     h = memory.history(db, cfg, at)
     ctx["athlete_history"] = {k: h[k] for k in ("coaches", "past_notes", "memory")}
-    if health.entities(cfg):
-        ctx["health"] = health.summary(db, day)
+    if health.enabled(cfg):
+        ctx["health"], ctx["health_source"] = health.summary(db, day), HEALTH_SOURCES[cfg.health_source]
     return ctx, c
 
 

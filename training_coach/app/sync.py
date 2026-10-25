@@ -1,15 +1,16 @@
-"""Strava → DB sync, stream processing and FTP/TSS recompute."""
+"""Activity source (Strava or Garmin) → DB sync, stream processing and FTP/TSS recompute."""
 from __future__ import annotations
 
 import logging
 from datetime import date, datetime, timedelta, timezone
+from typing import Protocol
 
 import httpx
 
 from . import metrics
 from .config import Config
 from .db import DB
-from .strava import RIDE_TYPES, RateLimited, StravaClient, summary_from_strava
+from .strava import RIDE_TYPES, RateLimited
 
 log = logging.getLogger(__name__)
 
@@ -21,7 +22,14 @@ EFTP_WINDOW_DAYS = 90
 TEST_VALID_DAYS = 84  # a field test sets FTP for 12 weeks, then eFTP takes over again
 
 
-async def sync(db: DB, strava: StravaClient, cfg: Config) -> dict:
+class Source(Protocol):
+    """What sync needs from StravaClient and GarminClient. A source raises RateLimited near its limits."""
+    async def activities_since(self, after_epoch: int) -> list[dict]: ...
+    def summary(self, a: dict) -> dict: ...  # the source's activity → db.ACTIVITY_COLUMNS, Strava's sport types
+    async def streams(self, activity_id: int) -> dict[str, list]: ...
+
+
+async def sync(db: DB, strava: Source, cfg: Config) -> dict:
     """One sync pass. Safe to call repeatedly; backfills streams gradually within rate limits."""
     now = datetime.now(timezone.utc)
     last = db.get("last_activity_start")
@@ -38,8 +46,11 @@ async def sync(db: DB, strava: StravaClient, cfg: Config) -> dict:
         result = (db.get("last_sync") or {}) | {"at": now.isoformat(timespec="seconds"), "rate_limited": str(e)}
         db.set("last_sync", result)
         return result
-    rides = [a for a in listed if (a.get("sport_type") or a.get("type")) in RIDE_TYPES]
-    new = sum(db.upsert_activity_summary(summary_from_strava(a)) for a in rides)
+    rides = [s for s in map(strava.summary, listed) if s["sport_type"] in RIDE_TYPES]
+    new = sum(db.upsert_activity_summary(a) for a in rides)
+    if db.get("mark_notified"):  # the first sync after a source switch: these rides had their push from the old source
+        db.mark_all_notified()
+        db.set("mark_notified", None)
     if last:
         db.delete_activities_not_in({a["id"] for a in rides}, after.strftime("%Y-%m-%dT%H:%M:%SZ"))
     if rides:

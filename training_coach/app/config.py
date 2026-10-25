@@ -16,7 +16,9 @@ if TYPE_CHECKING:
 DATA_DIR = Path(os.environ.get("TC_DATA_DIR", "/data"))
 
 WEEKDAYS = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"]
-SECRETS = {"anthropic_api_key", "strava_client_secret"}
+SECRETS = {"anthropic_api_key", "strava_client_secret", "garmin_api_key"}
+ACTIVITY_SOURCES = {"strava": "Strava", "garmin": "Garmin Connect"}
+HEALTH_SOURCES = {"apple": "Apple Health", "garmin": "Garmin Connect"}
 SYNC_INTERVALS = {0: "Off", 15: "Every 15 min", 30: "Every 30 min", 60: "Every hour", 120: "Every 2 hours",
                   240: "Every 4 hours"}
 
@@ -61,6 +63,10 @@ class Config:
     auto_analysis: bool = False
     auto_analysis_day: str = "mon"
     auto_analysis_time: str = "07:00"
+    # Where rides and health data come from (Profile → Connections). The Garmin key is the athlete's own, never shared.
+    activity_source: str = "strava"
+    health_source: str = "apple"
+    garmin_api_key: str = ""
     # Apple Health sensors from the HA iOS companion app (Profile). Empty = not used.
     health_rhr_entity: str = ""
     health_hrv_entity: str = ""

@@ -424,6 +424,49 @@ def multi_tenant() -> None:
     check(web2.get("/").status_code == 403 and "no longer has access" in r.text, "the owner can remove dev2 again", notice(r))
 
 
+def garmin_source() -> None:
+    """Last: switching the owner to Garmin removes the Strava rides the other sections need."""
+    section("Garmin Connect as the source of rides and health (0.9.0)")
+    since = len(log_text())
+    r = post("/profile/source", activity_source="garmin")
+    check("Connect Garmin first" in r.text and dbq("SELECT 1 FROM activities"),
+          "switching to Garmin before it's connected is refused and keeps the Strava rides")
+    r = post("/profile/garmin", garmin_api_key="not-my-key")
+    check("accept it: Garmin refused the API key" in r.text, "a key Garmin refuses is reported on Profile")
+    r = post("/profile/garmin", garmin_api_key="dev-garmin-key")
+    check("Garmin connected" in r.text and "Check again" in r.text, "a good key connects Garmin")
+    check("dev-garmin-key" not in "".join(page(p) for p in PAGES), "the Garmin key is never rendered back into HTML")
+    wait(lambda: "Syncing" not in page("/"), "any running sync to finish", 90)  # a switch waits for it
+    r = post("/profile/source", activity_source="garmin")
+    check("Rides now come from Garmin Connect" in r.text, "switching the ride source says what happened")
+    check(not dbq("SELECT 1 FROM activities WHERE id < 8000000"), "the Strava rides are removed on the switch")
+    wait(lambda: "Syncing" not in page("/"), "the first Garmin sync to finish", 90)
+    r = post("/profile/source", health_source="garmin")
+    check("Health data now comes from Garmin" in r.text, "switching the health source to Garmin")
+    for _ in range(8):  # streams are capped per sync run
+        wait(lambda: "Syncing" not in page("/"), "Garmin sync to finish", 90)
+        if dbq("SELECT 1 FROM activities") and not dbq("SELECT 1 FROM activities WHERE streams_fetched=0"):
+            break
+        post("/sync")
+    acts = dbq("SELECT * FROM activities")
+    check(len(acts) == 21, f"Garmin rides imported, walks left out ({len(acts)})")
+    check({a["sport_type"] for a in acts} == {"VirtualRide", "Ride"} and all(a["trainer"] == (a["sport_type"] == "VirtualRide") for a in acts),
+          "Garmin activity types map onto ride types (Zwift is indoor)")
+    check(all(a["streams_fetched"] and a["np"] and a["tss_source"] == "power" for a in acts),
+          "every Garmin ride has power from its FIT file and is scored")
+    errors = [e for e in job_errors("/") if e[0] in ("Sync", "Health")]  # the failure-mode section left an Analysis error
+    check(not errors, "no sync or health error banner after the Garmin sync", str(errors))
+    check("Open in Garmin Connect" in page(f"/activity/{acts[0]['id']}"), "the ride page links to Garmin Connect")
+    hrv = lambda: dbq("SELECT * FROM health_daily WHERE metric='hrv'")  # noqa: E731
+    rows = wait(lambda: len(r := hrv()) >= 35 and r, "Garmin health data", 90) or hrv()  # it lands in one go, but read mid-write
+    check(len(rows) == 35, f"Garmin health backfills 35 days of HRV ({len(rows)})")
+    check({r["metric"] for r in dbq("SELECT DISTINCT metric FROM health_daily")} >= {"hrv", "rhr", "sleep", "weight"},
+          "Garmin brings HRV, resting HR, sleep and weight")
+    check('aria-label="HRV:' in page("/"), "the Overview HRV gauge shows from day one with Garmin")
+    tb = tracebacks(since)
+    check(not tb, "no tracebacks during the Garmin switch and sync", "; ".join(tb[:3]))
+
+
 def mobile() -> None:
     section("iPhone layout (tools/mobile_check.py)")
     r = subprocess.run([str(HERE.parent / ".venv/bin/python"), str(HERE.parent / "tools/mobile_check.py")],
@@ -457,6 +500,7 @@ def main() -> None:
     failure_modes()
     expected = [t for t in tracebacks() if not t.startswith(("app.llm.LLMError", "anthropic.", "app.strava.RateLimited"))]
     check(not [t for t in expected if t not in tb], "failure-mode tracebacks are only the expected LLMError/RateLimited", "; ".join(expected[:3]))
+    garmin_source()
     if "--mobile" in sys.argv:
         mobile()
     failed = [n for ok, n in results if not ok]

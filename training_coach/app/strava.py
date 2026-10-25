@@ -137,6 +137,10 @@ class StravaClient:
     async def athlete(self) -> dict:
         return (await self._get("/athlete")).json()
 
+    @staticmethod
+    def summary(a: dict) -> dict:
+        return summary_from_strava(a)
+
     async def activities_since(self, after_epoch: int) -> list[dict]:
         out: list[dict] = []
         page = 1

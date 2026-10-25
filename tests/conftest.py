@@ -1,6 +1,6 @@
 import pytest
 
-from app import checkin, ha
+from app import checkin, garmin, ha
 
 
 @pytest.fixture(autouse=True)
@@ -10,6 +10,8 @@ def no_real_home_assistant(monkeypatch):
     monkeypatch.setattr(ha, "HA_TOKEN", "")
     # load_config falls back to ANTHROPIC_API_KEY: with it set, page views would start real check-ins
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    # A Garmin call a test forgot to mock fails here instead of reaching Garmin (.invalid never resolves)
+    monkeypatch.setattr(garmin, "BASE", "http://garmin.invalid")
 
 
 @pytest.fixture(autouse=True)

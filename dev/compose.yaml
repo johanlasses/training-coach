@@ -16,6 +16,7 @@ services:
       TC_STRAVA_URL: http://fakes:8001
       TC_ZWIFT_AUTH_URL: http://fakes:8003/token
       TC_ZWIFT_API_URL: http://fakes:8003/api
+      TC_GARMIN_URL: http://fakes:8004
     volumes:
       - addon-data:/data
     networks: [internal]  # no internet and no published port: reachable only through the fake ingress
@@ -31,11 +32,13 @@ services:
     volumes:
       - ./.state:/state
       - ../training_coach:/opt/app_src:ro
+      - ../tests:/opt/tests:ro  # the FIT writer for the fake Garmin
     ports:
       - "8124:80"    # ingress: http://localhost:8124/api/hassio_ingress/dev/ (and the push sink at /_dev/push)
       - "8101:8001"  # fake Strava controls (/_dev/*)
       - "8102:8002"  # fake Anthropic controls and request log
       - "8103:8003"  # fake Zwift (/_dev/files)
+      - "8104:8004"  # fake Garmin (/_dev/state)
     networks:
       internal:
         aliases: [supervisor]

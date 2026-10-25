@@ -192,7 +192,7 @@ def context(db: DB, cfg: Config, today: date) -> tuple[dict, coaches.Coach]:
         "memory": [f["text"] for f in db.memories()[-memory.MAX_FACTS:]],
     }
     signals = 0
-    if health.entities(cfg):
+    if health.enabled(cfg):
         ready = health.readiness(health.summary(db, today))
         signals = sum(r["signal"] for r in ready.values())
         ctx["readiness"] = ready | {"signals": signals}

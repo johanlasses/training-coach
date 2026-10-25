@@ -81,14 +81,17 @@ PLAN_SCHEMA = {
     "additionalProperties": False,
 }
 
-HEALTH_RULES = """- snapshot.health, when present, holds Apple Health trends: the last 7 days against a baseline of the 28 days \
+HEALTH_RULES = """- snapshot.health, when present, holds health trends from health_source (Apple Health or Garmin): the last \
+7 days against a baseline of the 28 days \
 before them, with the days of data in each. Read them as a readiness signal, never from a single day, and only \
 when the 7 days hold at least {min_days_7d} days of data and the baseline at least {min_days_baseline}. Signals: HRV \
 change_pct about {hrv_drop_pct}% or lower, resting HR change +{rhr_rise_bpm} bpm or more, 7-day sleep under ~{sleep_min_h} h. \
 Two signals together: swap the next hard \
 session for endurance or rest and say why. One signal: keep the session but shorten it or cap it at the low \
 end of its targets, and mention it. A sharp HRV rise during heavy load isn't freshness. Weight is only for \
-W/kg, and Apple's VO2 max comes from walking and running, so neither is a readiness signal. Missing data means \
+W/kg, and Apple's VO2 max comes from walking and running, so neither is a readiness signal. HRV in ms is only \
+comparable with the athlete's own baseline (Garmin: overnight rMSSD average; Apple: spot SDNN), never across \
+sources or with population norms: only change_pct counts. Missing data means \
 nothing.""".format(**health.READINESS)
 
 SYSTEM = """You are a cycling coach for a single amateur road and gravel cyclist in Mälardalen, Sweden. \

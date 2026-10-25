@@ -35,9 +35,13 @@ CI (`.github/workflows/test.yml`) runs ruff and pytest on push.
   add-on's admin token acts on (notify service, entities to read) must be checked against their own phone (`own_phone`,
   `ha.user_devices`).
 - **Settings live in the DB, not in the add-on options.** `training_coach/config.yaml` has no `options:`. All fields are in
-  `app/config.py` (`Config`) and are saved by `apply_form` in `main.py`. Credentials and notifications go on **Settings**
-  (`templates/settings.html`); athlete data and availability go on **Profile** (`templates/profile.html`).
-  Never render secret values back into HTML.
+  `app/config.py` (`Config`) and are saved by `apply_form` in `main.py`. The owner's shared credentials (Claude key,
+  Strava API app), notifications and schedules go on **Settings** (`templates/settings.html`); athlete data, availability
+  and the athlete's own connections (ride and health source, Strava sign-in, Garmin key, Zwift login) go on **Profile**
+  (`templates/profile.html`, Connections). Never render secret values back into HTML.
+- **Sources:** rides come from `State.source` (Strava or Garmin, `cfg.activity_source`), health from Apple Health via HA or
+  Garmin (`cfg.health_source`, `health.enabled`). `sync.sync` takes any `Source`. Switching a source clears what the old
+  one brought (ride ids could collide; Garmin rMSSD and Apple SDNN must not share a baseline).
 - **No weather logic.** It was removed on purpose (too complex, little value). Outdoor vs Zwift comes from season and daylight
   (`app/season.py`), and the athlete swaps days themselves.
 - **Ingress:** every URL in templates and redirects must be prefixed with `{{ base }}` / `back(request, …)`.

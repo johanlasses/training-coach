@@ -66,10 +66,11 @@
     <label>Max minutes, weekends <input name="max_weekend_minutes" value="{{ cfg.max_weekend_minutes }}" inputmode="numeric"></label>
   </div>
 </section>
+{% if cfg.health_source == 'apple' %}
 <section class="card">
   <h2>Apple Health</h2>
-  <p class="caption">Resting HR, HRV and sleep tell the coach how recovered you are. Turn on the Apple Health sensors in
-    the Home Assistant iPhone app (Settings → Companion App → Sensors), then pick them here. Read hourly from Home Assistant.</p>
+  <p class="caption">Turn on the Apple Health sensors in the Home Assistant iPhone app (Settings → Companion App →
+    Sensors), then pick them here. Read hourly from Home Assistant.</p>
   {% if health_options is none %}<p class="caption"><b>Couldn't read the sensor list from Home Assistant.</b> You can still type entity ids.</p>
   {% elif phones is not none and not phones %}<p class="caption"><b>No phone found for you in Home Assistant.</b> Install the Home Assistant
     app on your iPhone and sign in with your own account. Only your own phone's sensors can be used here.</p>{% endif %}
@@ -83,8 +84,109 @@
       7-day mean {{ health_latest[m].mean_7d }}{% if health_latest[m].baseline_mean %}, baseline {{ health_latest[m].baseline_mean }}{% endif %}</small>{% endif %}</label>
   {% endfor %}
 </section>
+{% endif %}
 <div class="form-actions"><button>Save profile</button></div>
 </form>
+<div class="form-cols" id="connections">
+<section class="card">
+  <h2>Rides</h2>
+  <p class="caption">Where your rides come from.</p>
+  <form method="post" action="{{ base }}/profile/source"
+        {% if has_rides %}onsubmit="return this.activity_source.value === '{{ cfg.activity_source }}' || confirm('Switch where rides come from? The rides synced so far are removed and the last 12 months come in from the new source. Plans, chat, notes and memory are kept.')"{% endif %}>
+    {% for k, name in activity_sources.items() %}
+    <label class="choice"><input type="radio" name="activity_source" value="{{ k }}" {{ 'checked' if k == cfg.activity_source }}>
+      <span>{{ name }}<small>{{ 'Your rides and their power data through your Strava account.' if k == 'strava' else 'Straight from your watch or bike computer, with your Garmin API key.' }}</small></span></label>
+    {% endfor %}
+    <button class="secondary">Use this</button>
+  </form>
+
+  {% if cfg.activity_source == 'strava' %}
+  <h3>Strava</h3>
+  {% if strava_athlete and strava_ok %}
+    <p>✓ Connected as <b>{{ strava_athlete.firstname }} {{ strava_athlete.lastname }}</b>.</p>
+    <form method="post" action="{{ base }}/settings/strava/disconnect"><button class="secondary">Disconnect</button></form>
+  {% elif not strava_app %}
+    <p class="caption">Strava needs an API app first.
+      {% if is_owner %}Set it up on <a href="{{ base }}/settings">Settings</a>.{% else %}Ask {{ owner_name }} to set it up, or use your own on <a href="{{ base }}/settings">Settings</a>.{% endif %}</p>
+  {% else %}
+  <ol class="steps-list">
+    <li>
+      <p>Approve access on Strava. Tick every box.{% if shared_strava %} It goes through {{ owner_name }}'s Strava API app.{% endif %}</p>
+      <a class="btn" href="{{ authorize_url }}" target="_blank" rel="noopener">Connect with Strava</a>
+    </li>
+    <li>
+      <p>Strava then sends you to a page that <b>won't load</b> (<code>{{ redirect_uri }}?…</code>). That's expected:
+        copy the full address from the browser's address bar and paste it here.</p>
+      <form method="post" action="{{ base }}/settings/strava/connect" class="row">
+        <input name="redirect_url" placeholder="{{ redirect_uri }}?state=&code=…&scope=…" required>
+        <button>Finish connecting</button>
+      </form>
+    </li>
+  </ol>
+  {% endif %}
+  {% endif %}
+</section>
+
+<section class="card">
+  <h2>Health</h2>
+  <p class="caption">Resting HR, HRV and sleep tell the coach how recovered you are.</p>
+  <form method="post" action="{{ base }}/profile/source"
+        onsubmit="return this.health_source.value === '{{ cfg.health_source }}' || confirm('Switch where health data comes from? The health history so far is removed: HRV from Garmin and Apple Health are different measures and must not share a baseline.')">
+    {% for k, name in health_sources.items() %}
+    <label class="choice"><input type="radio" name="health_source" value="{{ k }}" {{ 'checked' if k == cfg.health_source }}>
+      <span>{{ name }}<small>{{ 'From the Home Assistant iPhone app’s sensors, read hourly. Set them up below.' if k == 'apple' else 'Overnight HRV, sleep, resting HR and weight from Garmin Connect, with your Garmin API key. Brings in the last 5 weeks right away.' }}</small></span></label>
+    {% endfor %}
+    <button class="secondary">Use this</button>
+  </form>
+</section>
+
+<section class="card">
+  <h2>Garmin Connect</h2>
+  {% if garmin_key and not garmin_status.refused %}
+    <p>✓ Connected with your API key{% if garmin_status.at %} · last checked {{ garmin_status.at[:16] | replace('T', ' ') }}{% endif %}.
+      {% if cfg.activity_source != 'garmin' and cfg.health_source != 'garmin' %}Pick Garmin above to use it.{% endif %}</p>
+    <div class="row">
+      <form method="post" action="{{ base }}/profile/garmin"><button class="secondary">Check again</button></form>
+      <form method="post" action="{{ base }}/profile/garmin/disconnect"><button class="secondary">Disconnect</button></form>
+    </div>
+  {% else %}
+  {% if garmin_status.refused %}<p class="notice error">{{ garmin_status.error }}. Keys expire after the period you picked: create a new one.</p>
+  {% else %}<p class="caption">For rides or health data from Garmin. Connect it here first, then pick Garmin above.</p>{% endif %}
+  <ol class="steps-list">
+    <li><p>On Garmin Connect (web), open <a href="https://connect.garmin.com/modern/settings/personalApiToken" target="_blank" rel="noopener">Personal API Key</a>,
+      choose <b>Create Key</b>, accept the terms and pick how long it lasts (a year means fewer renewals).
+      Garmin shows the key once: copy it.</p></li>
+    <li><p>Paste it here. It's stored in this add-on only and never shown again.</p>
+      <form method="post" action="{{ base }}/profile/garmin" class="row">
+        <input type="password" name="garmin_api_key" autocomplete="off" required placeholder="Garmin API key">
+        <button>Connect Garmin</button>
+      </form></li>
+  </ol>
+  {% endif %}
+</section>
+
+<section class="card">
+  <h2>Zwift</h2>
+  {% if zwift_ok and zwift_profile %}
+    <p>✓ Connected as <b>{{ zwift_profile.firstName }} {{ zwift_profile.lastName }}</b>. Zwift sessions on the
+      Plan page have a <b>Send to Zwift</b> button.</p>
+    <form method="post" action="{{ base }}/settings/zwift/disconnect"><button class="secondary">Disconnect</button></form>
+  {% else %}
+  <p class="caption">Sends the coach's Zwift sessions straight to your Custom Workouts, with the coach's
+    on-screen messages. Zwift has no public API for this, so the add-on signs in like the Zwift app does.
+    Your password is used once to sign in and is <b>not stored</b>. Only the login session is kept.
+    {% if zwift_profile %}<br><b>The Zwift login has expired. Sign in again.</b>{% endif %}</p>
+  <form method="post" action="{{ base }}/settings/zwift/connect">
+    <div class="grid2">
+      <label>Zwift email <input type="email" name="zwift_username" autocomplete="username" required></label>
+      <label>Password <input type="password" name="zwift_password" autocomplete="current-password" required></label>
+    </div>
+    <button>Connect Zwift</button>
+  </form>
+  {% endif %}
+</section>
+</div>
+
 <section class="card notes-card">
   <h2>Coach notes</h2>
   <p class="caption">Saved from the <a href="{{ base }}/coach">Coach</a> chat. Every plan and analysis takes them into account until they end.</p>

@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.9.0 (2026-10-26)
+
+- **Garmin Connect as a source.** Your rides, your health data, or both can now come straight from Garmin, through
+  Garmin's official Personal API with a key you create on Garmin Connect. Rides come with power and heart rate from
+  the original file from your watch or bike computer. Health means overnight HRV, sleep, resting heart rate and
+  weight, and the last five weeks come in right away, so the coach and the Overview gauges see your trends from day one.
+  Strava and Apple Health work as before.
+- **Your connections are on Profile now.** Profile → **Connections** is where you pick where rides and health data
+  come from, and connect Strava, Garmin and Zwift. Settings keeps the Claude key, the Strava API app, notifications
+  and schedules. Connect Garmin before you switch to it: switching removes what the old source brought in, and the
+  new one fills it in again. Plans, chat, notes and memory are kept. A **Check again** button re-tests your Garmin key.
+- E-bike rides are left out when they come from Garmin, like on Strava: the motor's help isn't your training load.
+- The coach no longer compares HRV numbers across sources or with other people: only your own trend counts.
+- If you record a Zwift ride on Zwift and on your watch, Garmin may have it twice: delete one of them in Garmin
+  Connect for now.
+
 ## 0.8.0 (2026-10-25)
 
 - **Your coach checks in every day.** The first time you open the add-on each day, your coach leaves a short,

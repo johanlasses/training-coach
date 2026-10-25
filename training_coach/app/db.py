@@ -414,6 +414,20 @@ class DB:
         rows = self.conn.execute("SELECT * FROM health_daily WHERE date >= ? ORDER BY date", (since,)).fetchall()
         return [dict(r) for r in rows]
 
+    def clear_health(self) -> None:
+        """On a switch of health source: Garmin's overnight rMSSD and Apple's spot SDNN must never share a baseline."""
+        self.conn.execute("DELETE FROM health_daily")
+        self.conn.commit()
+
+    def mark_all_notified(self) -> None:
+        self.conn.execute("UPDATE activities SET notified=1")
+        self.conn.commit()
+
+    def clear_activities(self) -> None:
+        """On a switch of activity source: ids from two services could collide, and the same ride would count twice."""
+        self.conn.execute("DELETE FROM activities")
+        self.conn.commit()
+
 
 def _chat(r: sqlite3.Row) -> dict:
     d = dict(r)

@@ -143,8 +143,9 @@ def test_plan_shows_send_button_only_when_connected(client):
     connected(client.st.db)
     assert f'action="/plan/{client.plan_id}/{client.day}/zwift"' in client.get(week).text
     client.st.db.set("zwift_profile", {"id": 42, "firstName": "Johan", "lastName": "L"})
-    settings = client.get("/settings").text
-    assert "Connect Zwift" not in settings and "Connected as <b>Johan L</b>" in settings
+    profile = client.get("/profile").text  # connections moved from Settings to Profile in 0.9.0
+    assert "Connect Zwift" not in profile and "Connected as <b>Johan L</b>" in profile
+    assert "Connect Zwift" not in client.get("/settings").text
 
 
 def test_upload_route_uses_coach_voice_and_records_it(client, monkeypatch):

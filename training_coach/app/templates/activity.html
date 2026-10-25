@@ -5,7 +5,8 @@
 <p><a href="{{ base }}/">← Overview</a></p>
 <h2 class="page-title">{{ a.name }}</h2>
 <p class="muted">{{ ride_type(a) }} · {{ a.start_date_local[:10] }} {{ a.start_date_local[11:16] }} ·
-  <a href="https://www.strava.com/activities/{{ a.id }}" target="_blank" rel="noopener">Open on Strava</a></p>
+  {% if activity_source == 'garmin' %}<a href="https://connect.garmin.com/modern/activity/{{ a.id }}" target="_blank" rel="noopener">Open in Garmin Connect</a>
+  {%- else %}<a href="https://www.strava.com/activities/{{ a.id }}" target="_blank" rel="noopener">Open on Strava</a>{% endif %}</p>
 
 <div class="card coach-feedback">
   {% if a.feedback %}
@@ -71,6 +72,6 @@
   </table>
 </div>
 {% elif not a.streams_fetched %}
-<p class="muted">Power and heart-rate detail for this ride is still being fetched from Strava.</p>
+<p class="muted">Power and heart-rate detail for this ride is still being fetched from {{ source_name }}.</p>
 {% endif %}
 {% endblock %}

@@ -1,6 +1,9 @@
-"""Apple Health numbers, read from the HA iOS companion app's sensors, as daily values and trends for the coach.
+"""Health numbers (resting HR, HRV, sleep, weight) as daily values and trends for the coach, from one of two sources.
 
-The app pushes HealthKit samples to HA as sensor states. Their timestamps are the push time, not the sample
+Garmin (fetch_garmin): daily values straight from Garmin Connect, per calendar date. HRV is the overnight average
+(rMSSD), which is why switching source clears the history: it's a different measure from Apple's SDNN.
+
+Apple Health (fetch): read from the HA iOS companion app's sensors. The app pushes HealthKit samples to HA as sensor states. Their timestamps are the push time, not the sample
 time (home-assistant/iOS#5670), so a reading is filed under the day the phone reported it. A state the phone
 didn't report today is yesterday's number, and isn't stored again. For HRV the first reading of the day is kept: Apple's
 spot SDNN taken after a ride reads low, so the overnight/morning value is the useful one.
@@ -48,6 +51,35 @@ def normalise(metric: str, value: float, unit: str) -> float | None:
     if metric == "weight":
         return value * TO_KG[unit] if unit in TO_KG else None
     return value
+
+
+def enabled(cfg: Config) -> bool:
+    """Health data is set up: Garmin with a key, or Apple Health with at least one sensor picked."""
+    return bool(cfg.garmin_api_key) if cfg.health_source == "garmin" else bool(entities(cfg))
+
+
+GARMIN_BACKFILL_DAYS = 35  # the 7 days plus the 28-day baseline: Garmin keeps history, so trends work from day one
+GARMIN_RECHECK_DAYS = 3    # the watch syncs late at times (sleep and HRV land after the morning upload)
+
+
+async def fetch_garmin(db: DB, garmin, today: date) -> int:
+    """Stores Garmin's daily RHR, HRV (overnight average), sleep and weight. The first read backfills the baseline;
+    later ones re-read from the last stored day (at least the last few days), so days the add-on was down get filled
+    in too. Returns how many values were stored."""
+    oldest = today - timedelta(days=GARMIN_BACKFILL_DAYS - 1)
+    rows = db.health(oldest.isoformat())
+    first_time = not rows
+    latest = date.fromisoformat(max(r["date"] for r in rows)) if rows else oldest
+    first = oldest if first_time else max(oldest, min(today - timedelta(days=GARMIN_RECHECK_DAYS - 1), latest))
+    days = await garmin.health_days(first, today)
+    n = 0
+    for day, values in days.items():
+        for metric, value in values.items():
+            if metric in METRICS and value > 0:
+                db.set_health(day, metric, value, METRICS[metric][1])
+                n += 1
+    logger.info("Garmin health: stored %d values for %d days%s", n, len(days), " (backfill)" if first_time else "")
+    return n
 
 
 async def fetch(db: DB, cfg: Config, today: date) -> int:

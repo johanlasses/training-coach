@@ -1,10 +1,10 @@
 # Training Coach
 
-A Home Assistant add-on for road and gravel training. It pulls rides from Strava (Zwift rides arrive there
-automatically), shows a Strava-style feed with load and power statistics, and uses Claude to plan your week
-(Zwift workouts as `.zwo`, or outdoor rides when the season and daylight allow) and to write an in-depth
-analysis, with a choice of three coaching styles. You can chat with the coach to change the week, and it can use
-Apple Health recovery data from the Home Assistant iPhone app.
+A Home Assistant add-on for road and gravel training. It pulls rides from Strava or Garmin Connect, shows a
+Strava-style feed with load and power statistics, and uses Claude to plan your week (Zwift workouts as `.zwo`, or
+outdoor rides when the season and daylight allow) and to write an in-depth analysis, with a choice of three coaching
+styles. You can chat with the coach to change the week, and it can use recovery data from Apple Health (through the
+Home Assistant iPhone app) or Garmin.
 
 ## Install
 
@@ -14,8 +14,12 @@ Setup steps are in [training_coach/DOCS.md](training_coach/DOCS.md).
 
 ## How it works
 
-- **Sync** (`app/strava.py`, `app/sync.py`): imports cycling activities and their power and HR streams. Only derived
-  metrics are stored, not raw streams.
+- **Sync** (`app/sync.py` over a `Source`: `app/strava.py` or `app/garmin.py`, picked by `State.source`): imports
+  cycling activities and their power and HR streams (Garmin: parsed from the original FIT file). Only derived metrics
+  are stored, not raw streams.
+- **Garmin** (`app/garmin.py`): the official Personal API with the athlete's own key. The key mints a 24-hour token
+  (a bare JWT); health reads (HRV `lastNightAvg`, sleep, resting HR, weight) backfill 35 days. Only a 401 marks the
+  key refused; any other failure is treated as an outage. The OpenAPI spec is in `dev/fakes/garmin_personal_openapi.json`.
 - **Metrics** (`app/metrics.py`): NP, IF, TSS (hrTSS when there's no power), power curve, eFTP (95% of best 20 min or best 60 min over 90 days), CP/W′, CTL/ATL/TSB, Pw:HR decoupling.
 - **Coaches** (`app/coaches.py`, `app/coaches/*.md`): three coaching styles. The markdown is appended to the plan and analysis
   prompts. Per-coach style rules (back-to-back hard days, max hard sessions) feed the plan validator.

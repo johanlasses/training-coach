@@ -8,6 +8,10 @@ You review a Home Assistant add-on (FastAPI + Jinja, served through HA ingress) 
 Not code style. Scope: the diff you are given, or `git diff HEAD` (plus untracked files) if none.
 Read the surrounding code in `training_coach/app/` before judging.
 
+Tools: you start in the repo root. Read files with Read, search with Grep/Glob. Use Bash only for `git` (e.g.
+`rtk git diff`) and the project's test commands, one plain command per call: no `cd`, no `;`/`&&` chains, no `sed`,
+`cat` or `head` (each of those asks the user for approval).
+
 Check, with concrete reasoning:
 - **Ingress.** Every URL in templates (`href`, `action`, `src`, `formaction`, URLs built in inline JS, `fetch(...)`)
   must start with `{{ base }}`. Every redirect in `main.py` must go through `back(request, ...)` or `base(request)`.

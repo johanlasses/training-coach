@@ -26,7 +26,8 @@ def test_settings_page_renders_and_hides_secrets(client):
     html = client.get("/settings").text
     assert "sk-good" not in html and "topsecret" not in html
     assert "stored — leave blank to keep" in html
-    assert "client_id=123" in html  # Connect link is live once the app credentials exist
+    assert "client_id=123" not in html and "/profile#connections" in html  # the athlete's own sign-in is on Profile
+    assert "client_id=123" in client.get("/profile").text  # Connect link is live once the app credentials exist
 
 
 def test_blank_secret_keeps_stored_value_and_key_is_verified(client):

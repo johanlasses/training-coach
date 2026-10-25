@@ -21,10 +21,11 @@ from fastapi.templating import Jinja2Templates
 from . import analysis, chat, checkin, coaches, feedback, ftptest, ha, health, memory, overview, stats, workouts
 from . import coach as coach_mod
 from . import llm
-from .config import (DATA_DIR, FIELD_TYPES, LEVELS, SECRETS, SYNC_INTERVALS, WEEKDAYS, Config, level_for_wkg, load_config,
-                     save_config)
+from .config import (ACTIVITY_SOURCES, DATA_DIR, FIELD_TYPES, HEALTH_SOURCES, LEVELS, SECRETS, SYNC_INTERVALS, WEEKDAYS,
+                     Config, level_for_wkg, load_config, save_config)
 from .db import DB
-from .strava import REDIRECT_URI, StravaClient
+from .garmin import GarminClient, GarminError
+from .strava import REDIRECT_URI, RateLimited, StravaClient
 from .sync import recompute, sync
 from .zwift import ZwiftClient, ZwiftError
 
@@ -34,6 +35,7 @@ log = logging.getLogger("training_coach")
 HERE = Path(__file__).parent
 DUE_WINDOW = timedelta(hours=3)
 HEALTH_EVERY = timedelta(hours=1)  # a local HA read, no external API
+GARMIN_HEALTH_EVERY = timedelta(hours=3)  # four Garmin calls; daily values that land once the watch syncs
 SYNC_RETRY = timedelta(minutes=10)  # a failed sync before the check-in: don't sync again on every page, check in anyway
 INGRESS_IP = "172.30.32.2"  # Supervisor on the hassio network: ingress requests come from here
 ATHLETE_ID = re.compile(r"[A-Za-z0-9_-]{1,64}")  # HA user ids are uuid hex; also a folder name, so nothing else
@@ -78,7 +80,17 @@ class State:
                 if not getattr(cfg, f"health_{m}_entity").startswith("sensor."):
                     setattr(cfg, f"health_{m}_entity", "")
         self.strava = StravaClient(self.db, cfg.strava_client_id, cfg.strava_client_secret)
+        self.garmin = GarminClient(self.db, cfg.garmin_api_key)
         self.zwift = ZwiftClient(self.db)
+
+    @property
+    def source(self) -> StravaClient | GarminClient:
+        """Where rides come from (Profile → Connections)."""
+        return self.garmin if self.cfg.activity_source == "garmin" else self.strava
+
+    @property
+    def source_name(self) -> str:
+        return ACTIVITY_SOURCES[self.cfg.activity_source]
 
     def own_cfg(self) -> Config:
         """The settings this athlete set themselves: the owner's shared values blanked out."""
@@ -117,10 +129,10 @@ class State:
 
     # --- jobs ---------------------------------------------------------------
     async def do_sync(self) -> None:
-        if not self.strava.configured:
-            raise RuntimeError("Strava is not connected — see Settings")
+        if not self.source.configured:
+            raise RuntimeError(f"{self.source_name} is not connected — see Profile")
         try:
-            await sync(self.db, self.strava, self.cfg)
+            await sync(self.db, self.source, self.cfg)
         finally:
             if getattr(self, "checkin_after_sync", False):  # waiting for this sync; with stale data if it failed
                 self.checkin_after_sync = False
@@ -152,8 +164,8 @@ class State:
         snap["ftp_tests"] = self.recent_tests(today)
         snap["coach_notes"] = [{k: n[k] for k in ("kind", "start", "end", "text")}
                                for n in self.db.active_notes(today.isoformat())]
-        if health.entities(self.cfg):
-            snap["health"] = health.summary(self.db, today)
+        if health.enabled(self.cfg):
+            snap["health"], snap["health_source"] = health.summary(self.db, today), HEALTH_SOURCES[self.cfg.health_source]
         snap["athlete_history"] = memory.history(self.db, self.cfg, datetime.now())
         return snap
 
@@ -204,7 +216,7 @@ class State:
         if not synced and (self.jobs.get("sync") or {}).get("running"):
             self.checkin_after_sync = True
             return
-        if not synced and self.strava.configured and self.sync_stale(utc) and not (
+        if not synced and self.source.configured and self.sync_stale(utc) and not (
                 self.sync_tried and utc - self.sync_tried < SYNC_RETRY):
             self.sync_tried, self.checkin_after_sync = utc, True
             self.start_job("sync", self.do_sync())
@@ -289,7 +301,7 @@ class State:
                 cfg = self.cfg
                 last, utc = self.db.get("last_sync"), datetime.now(timezone.utc)
                 every = timedelta(minutes=cfg.sync_interval_min)
-                if self.strava.configured and cfg.sync_interval_min and (
+                if self.source.configured and cfg.sync_interval_min and (
                         not last or utc - datetime.fromisoformat(last["at"]) > every) and (
                         not self.sync_tried or utc - self.sync_tried > every):
                     self.sync_tried = utc
@@ -302,10 +314,12 @@ class State:
                     except ZwiftError as e:
                         log.warning("Zwift token refresh: %s", e)
                 fetched = self.db.get("health_fetched")
-                if health.entities(cfg) and ha.available() and (
-                        not fetched or now - datetime.fromisoformat(fetched) >= HEALTH_EVERY):
+                garmin_health = cfg.health_source == "garmin" and self.garmin.configured
+                if (garmin_health or (cfg.health_source == "apple" and health.entities(cfg) and ha.available())) and (
+                        not fetched or now - datetime.fromisoformat(fetched) >= (GARMIN_HEALTH_EVERY if garmin_health else HEALTH_EVERY)):
                     self.db.set("health_fetched", now.isoformat(timespec="seconds"))
-                    self.start_job("health", health.fetch(self.db, cfg, now.date()))
+                    self.start_job("health", health.fetch_garmin(self.db, self.garmin, now.date()) if garmin_health
+                                   else health.fetch(self.db, cfg, now.date()))
                 if cfg.notify_service and self.due("notified", now, cfg.notify_time):
                     self.ran("notified", now)
                     s = overview.today_session(self.db, now.date())
@@ -528,6 +542,7 @@ def render(request: Request, name: str, **ctx) -> Response:
     return templates.TemplateResponse(request, name, {
         "base": base(request), "jobs": st.jobs, "last_sync": st.db.get("last_sync"), "flash": flash,
         "is_owner": st.is_owner, "owner_name": (st.owner.name if st.owner else st.name) or "the owner",
+        "source_ok": st.source.configured, "source_name": st.source_name, "activity_source": st.cfg.activity_source,
         "strava_ok": st.strava.configured, "zwift_ok": st.zwift.configured, "ai_ok": bool(st.cfg.anthropic_api_key),
         "checkin_unread": st.checkin_unread(), **ctx})
 
@@ -550,7 +565,7 @@ async def home(request: Request):
     d = stats.dashboard(acts, today, st.cfg)
     feed = acts[:20]
     status = overview.status(st.db, st.cfg, acts, today, d)
-    ready = health.readiness(health.summary(st.db, today)) if health.entities(st.cfg) else None
+    ready = health.readiness(health.summary(st.db, today)) if health.enabled(st.cfg) else None
     return render(request, "home.html", d=d, status=status, gauges=overview.gauges(status, ready),
                   latest=feed[0] if feed else None, feed=feed[1:], planned=planned_by_date(st.db, feed),
                   feedback_running=(st.jobs.get("feedback") or {}).get("running"))
@@ -665,7 +680,7 @@ async def analysis_view(request: Request, id: int | None = None):
 @app.post("/sync")
 async def sync_now(request: Request):
     st = athlete(request)
-    if st.strava.paused_until > time.time():
+    if st.source is st.strava and st.strava.paused_until > time.time():
         until = datetime.fromtimestamp(st.strava.paused_until, timezone.utc).strftime("%H:%M")
         st.flash = ("ok", f"Strava's rate limit was reached. Sync resumes on its own at {until} UTC.")
         return back(request, "/")
@@ -819,9 +834,11 @@ async def analysis_now(request: Request):
 
 
 DAY_NAMES = dict(zip(WEEKDAYS, ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]))
-CHOICES = {"athlete_level": LEVELS, "default_coach": coaches.COACHES, "sync_interval_min": {str(k) for k in SYNC_INTERVALS},
+CHOICES = {"athlete_level": LEVELS, "default_coach": coaches.COACHES, "activity_source": ACTIVITY_SOURCES,
+           "health_source": HEALTH_SOURCES, "sync_interval_min": {str(k) for k in SYNC_INTERVALS},
            "auto_plan_day": DAY_NAMES, "auto_analysis_day": DAY_NAMES}
 TIMES = {"notify_time", "auto_plan_time", "auto_analysis_time"}
+SOURCE_FIELDS = {"activity_source", "health_source", "garmin_api_key"}  # their own routes, never apply_form
 
 
 def valid_time(raw: str) -> bool:
@@ -865,8 +882,8 @@ def apply_form(st: State, form, phones: list[str] | None = None) -> list[str]:
             if form.get("_section") == "schedules":  # unticked checkboxes are absent from the form
                 setattr(cfg, name, name in form)
             continue
-        if name not in form or name in skip or (name == "anthropic_api_key" and not st.is_owner):
-            continue
+        if name not in form or name in skip or (name == "anthropic_api_key" and not st.is_owner) or name in SOURCE_FIELDS:
+            continue  # sources only change through /profile/source, which clears what the old source brought
         raw = str(form[name]).strip()
         if phones is not None and raw and not own_phone(name, raw, phones):
             errors.append(f"{name.replace('_', ' ')}: {raw} isn't from your phone")
@@ -903,12 +920,13 @@ async def settings_view(request: Request):
     last_sync = st.db.get("last_sync")
     schedule = {
         "sync": {"last": last_sync["at"][:16].replace("T", " ") + " UTC" if last_sync else None,
-                 "next": None if not cfg.sync_interval_min else (SYNC_INTERVALS[cfg.sync_interval_min] if st.strava.configured
-                                                    else "Waiting for Strava to be connected")},
+                 "next": None if not cfg.sync_interval_min else (SYNC_INTERVALS[cfg.sync_interval_min] if st.source.configured
+                                                    else f"Waiting for {st.source_name} to be connected")},
         "zwift": {"last": st.db.get("zwift_refreshed"),
                   "next": None if not cfg.zwift_refresh else ("Daily" if st.zwift.configured else "Zwift not connected")},
         "health": {"last": (st.db.get("health_fetched") or "")[:16].replace("T", " ") or None,
-                   "next": "Hourly" if health.entities(cfg) else None},
+                   "next": ("Every 3 hours from Garmin" if cfg.health_source == "garmin" else "Hourly from Home Assistant")
+                   if health.enabled(cfg) else None},
         "notify": {"last": st.db.get("notified"), "next": next_run(now, cfg.notify_time) if cfg.notify_service else None},
         "plan": {"last": st.db.get("auto_plan_ran"), "next": next_run(now, cfg.auto_plan_time, cfg.auto_plan_day) if cfg.auto_plan else None},
         "analysis": {"last": st.db.get("auto_analysis_ran"),
@@ -992,7 +1010,13 @@ async def profile_view(request: Request):
                   health_latest=health.summary(st.db, today), health_options=options,
                   # Pre-fill only on first setup, so a field cleared on purpose stays cleared
                   health_found={} if health.entities(st.cfg) else health.detect(options or []),
-                  suggested=level_for_wkg(wkg) if wkg else None)
+                  suggested=level_for_wkg(wkg) if wkg else None,
+                  # Connections
+                  activity_sources=ACTIVITY_SOURCES, health_sources=HEALTH_SOURCES, has_rides=bool(acts),
+                  strava_athlete=st.db.get("strava_athlete"), strava_app=st.strava.has_app, shared_strava="strava_client_id" in st.shared,
+                  authorize_url=st.strava.authorize_url() if st.strava.has_app else None, redirect_uri=REDIRECT_URI,
+                  garmin_key=bool(st.cfg.garmin_api_key), garmin_status=st.garmin.status(),
+                  zwift_profile=st.db.get("zwift_profile"))
 
 
 @app.post("/profile")
@@ -1006,6 +1030,84 @@ async def profile_save(request: Request):
     return back(request, "/profile")
 
 
+@app.post("/profile/source")
+async def source_save(request: Request):
+    """Choose where rides and health data come from. Switching clears what the old source brought in: ride ids from two
+    services could collide, and Garmin's HRV is a different measure from Apple's."""
+    st = athlete(request)
+    form = await request.form()
+    act, hea = str(form.get("activity_source", st.cfg.activity_source)), str(form.get("health_source", st.cfg.health_source))
+    if act not in ACTIVITY_SOURCES or hea not in HEALTH_SOURCES:
+        raise HTTPException(400)
+    if "garmin" in {act, hea} - {st.cfg.activity_source, st.cfg.health_source} and not st.garmin.configured:
+        # Clearing the rides before the new source works would leave the athlete with nothing (CTL 0) in between
+        st.flash = ("error", "Connect Garmin first (below), then switch to it.")
+        return back(request, "/profile")
+    if any((st.jobs.get(k) or {}).get("running") for k in ("sync", "health")):
+        # A running sync or health read would write the old source's data into the cleared tables
+        st.flash = ("error", "A sync is running. Try again in a minute.")
+        return back(request, "/profile")
+    done = []
+    if act != st.cfg.activity_source:
+        st.db.clear_activities()
+        for k in ("last_activity_start", "last_sync"):
+            st.db.set(k, None)
+        st.db.set("mark_notified", True)  # the rides coming back aren't new: no second round of ride pushes
+        done.append(f"Rides now come from {ACTIVITY_SOURCES[act]}. The rides from {ACTIVITY_SOURCES[st.cfg.activity_source]} "
+                    "were removed; plans, chat, notes and memory are kept.")
+    if hea != st.cfg.health_source:
+        st.db.clear_health()
+        st.db.set("health_fetched", None)
+        done.append(f"Health data now comes from {HEALTH_SOURCES[hea]}.")
+    st.cfg.activity_source, st.cfg.health_source = act, hea
+    st.save()
+    st.reload()
+    if done and st.source.configured:
+        st.start_job("sync", st.do_sync())
+    st.flash = ("ok", " ".join(done) or "Nothing changed.")
+    return back(request, "/profile")
+
+
+@app.post("/profile/garmin")
+async def garmin_save(request: Request):
+    """Save the athlete's Garmin Personal API key (or, with none given, check the stored one again), check it by minting
+    a token, then sync."""
+    st = athlete(request)
+    key = str((await request.form()).get("garmin_api_key", "")).strip()
+    if not key and not st.cfg.garmin_api_key:
+        st.flash = ("error", "Paste your Garmin API key first.")
+        return back(request, "/profile")
+    if key:
+        st.cfg.garmin_api_key = key
+        st.save()
+        st.reload()
+    st.garmin.disconnect()  # forget the old token and any refusal: this check decides
+    try:
+        await st.garmin.check()
+    except RateLimited:
+        st.flash = ("ok", "Saved. Garmin is busy right now; the key is checked again on the next sync.")
+        return back(request, "/profile")
+    except (GarminError, httpx.HTTPError) as e:
+        st.flash = ("error", f"Saved, but Garmin didn't accept it: {e}")
+        return back(request, "/profile")
+    st.db.set("health_fetched", None)  # read health on the next tick (a backfill the first time)
+    if st.cfg.activity_source == "garmin":
+        st.start_job("sync", st.do_sync())
+    st.flash = ("ok", "Garmin connected." + (" First sync started: it pulls 12 months of rides." if st.cfg.activity_source == "garmin" else ""))
+    return back(request, "/profile")
+
+
+@app.post("/profile/garmin/disconnect")
+async def garmin_disconnect(request: Request):
+    st = athlete(request)
+    st.cfg.garmin_api_key = ""
+    st.save()
+    st.reload()
+    st.garmin.disconnect()
+    st.flash = ("ok", "Garmin disconnected and its key removed. Your synced rides are kept.")
+    return back(request, "/profile")
+
+
 @app.post("/settings/strava/connect")
 async def strava_connect(request: Request):
     st = athlete(request)
@@ -1014,11 +1116,11 @@ async def strava_connect(request: Request):
         who = await st.strava.exchange_code(pasted)
     except (ValueError, KeyError) as e:
         st.flash = ("error", str(e))
-        return back(request, "/settings")
+        return back(request, "/profile")
     st.flash = ("ok", f"Connected to Strava as {who.get('firstname', '')} {who.get('lastname', '')}. "
                       "First sync started — it pulls 12 months of rides, power detail fills in over a few hours.")
     st.start_job("sync", st.do_sync())
-    return back(request, "/settings")
+    return back(request, "/profile")
 
 
 @app.post("/settings/strava/disconnect")
@@ -1026,7 +1128,7 @@ async def strava_disconnect(request: Request):
     st = athlete(request)
     st.strava.disconnect()
     st.flash = ("ok", "Strava disconnected. Your synced rides are kept.")
-    return back(request, "/settings")
+    return back(request, "/profile")
 
 
 @app.post("/settings/zwift/connect")
@@ -1041,7 +1143,7 @@ async def zwift_connect(request: Request):
     else:
         st.flash = ("ok", f"Connected to Zwift as {profile.get('firstName', '')} {profile.get('lastName', '')}. "
                           "Zwift sessions on the Plan page now have a “Send to Zwift” button.")
-    return back(request, "/settings")
+    return back(request, "/profile")
 
 
 @app.post("/settings/zwift/disconnect")
@@ -1049,7 +1151,7 @@ async def zwift_disconnect(request: Request):
     st = athlete(request)
     st.zwift.disconnect()
     st.flash = ("ok", "Zwift disconnected. Workouts already sent stay in your Zwift account.")
-    return back(request, "/settings")
+    return back(request, "/profile")
 
 
 @app.get("/healthz")

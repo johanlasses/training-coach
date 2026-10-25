@@ -8,15 +8,22 @@ It appears as **Training** in the Home Assistant sidebar.
 Open the panel and go to **Settings**:
 
 1. **Claude API key**: create one at <https://console.anthropic.com/settings/keys>. It is checked when you save.
-2. **Strava**:
-   - Create an API application at <https://www.strava.com/settings/api> and set *Authorization Callback Domain* to `localhost`.
-   - Enter its Client ID and Client secret, then click **Connect with Strava** and approve.
-   - Strava redirects to a `http://localhost/strava-callback?...` page that won't load. Copy that full address and paste it into step 3.
-3. Set a notify service on **Settings** (e.g. `notify.mobile_app_<your_iphone>`). You get a push after every ride
-   with the coach's verdict, and a morning push with the day's session.
+2. **Strava API app** (only if your rides come from Strava): create an API application at
+   <https://www.strava.com/settings/api> with *Authorization Callback Domain* `localhost`, and enter its Client ID and
+   Client secret.
+3. Set a notify service (e.g. `notify.mobile_app_<your_iphone>`). You get a push after every ride with the coach's
+   verdict, and a morning push with the day's session.
 
-Then open **Profile** and set your goals, level, sessions per week, weight, threshold heart rate and availability.
-The coach never plans outside the availability limits.
+Then open **Profile**:
+
+- Set your goals, level, sessions per week, weight, threshold heart rate and availability. The coach never plans
+  outside the availability limits.
+- Under **Connections**, pick where your rides come from (**Strava** or **Garmin Connect**) and your health data
+  (**Apple Health** or **Garmin Connect**), and connect them:
+  - **Strava**: click **Connect with Strava** and approve. Strava redirects to a `http://localhost/strava-callback?...`
+    page that won't load. Copy that full address and paste it into the box below the button.
+  - **Garmin**: see [Garmin Connect](#garmin-connect).
+  - **Zwift**, to send workouts straight to Zwift: see [Zwift workouts](#zwift-workouts).
 
 ## Coaches
 
@@ -30,7 +37,8 @@ On **Plan** and **Analysis** you can run any coach, so you can compare them. Eac
 The first plan generated for a week is the active one, and it drives today's session, the sensor and the morning
 notification. **Use this plan** switches it. Each coach's philosophy lives in `app/coaches/<name>.md`.
 
-The first sync imports 12 months of rides. Power detail (NP, power curve, zones) is fetched gradually so Strava's rate limits aren't hit, which can take a few hours.
+The first sync imports 12 months of rides. Power detail (NP, power curve, zones) is fetched gradually so the rate
+limits aren't hit, which can take a few hours.
 
 ## Overview and ride feedback
 
@@ -114,10 +122,34 @@ Each coach has its own test, and plans it when you ask, or when a test is due un
 Ride the all-out efforts with ERG off. Once the ride has synced, the test day on **Plan** shows the estimated FTP
 and a **Set as FTP** button. That sets the FTP override on Profile, which stays until you clear it.
 
+## Garmin Connect
+
+Garmin can be the source of your rides, your health data, or both (**Profile → Connections**). It uses Garmin's
+official Personal API with a key you create yourself:
+
+1. On Garmin Connect in a browser, open **Personal API Key** (<https://connect.garmin.com/modern/settings/personalApiToken>),
+   choose **Create Key**, accept the terms and pick how long it lasts. A year means fewer renewals.
+2. Garmin shows the key once. Copy it, pick Garmin under **Connections** and paste it into **Connect Garmin**.
+   The add-on checks it right away. It's stored only in the add-on and never shown again.
+
+**Rides**: all cycling activities (road, gravel, MTB, indoor and Zwift rides that reach Garmin), with power and heart
+rate from the original FIT file. Walks and other sports are left out for now.
+**Health**: overnight HRV, sleep, resting heart rate and weight. The first read brings in the last five weeks, so the
+coach sees trends right away. After that it reads every three hours.
+
+When the key expires (Garmin emails you a week before), Profile says so: create a new one and paste it in.
+Each athlete uses their own key: Garmin's Personal API is for your own data.
+
+**Switching source** (Strava ↔ Garmin for rides, Apple Health ↔ Garmin for health) removes what the old source
+brought in, and the new one fills it in again: 12 months of rides, or five weeks of health data from Garmin. That
+keeps the same ride from counting twice, and Garmin's HRV is a different measurement from Apple's, so the two must
+not share a baseline. Plans, chat, notes and memory are kept.
+
 ## Apple Health
 
 With Apple Health data, the coach can see how recovered you are: resting heart rate, HRV, sleep, weight and VO2 max.
-It eases off when HRV drops or resting HR rises over several days, not on a single bad night.
+It eases off when HRV drops or resting HR rises over several days, not on a single bad night. Pick **Apple Health**
+under **Profile → Connections**.
 
 1. In the Home Assistant iPhone app (2026.8 or later): **Settings → Companion App → Sensors → Apple Health**.
    Enable the sensors you want and allow access in the iOS prompt. The feature is marked *Labs*.
@@ -142,9 +174,10 @@ You control all of it on **Settings → Schedules**. Claude jobs are off until y
 
 | Default | What |
 |---|---|
-| Every 30 min | Sync new rides from Strava (15 min to 4 h, or off) |
+| Every 30 min | Sync new rides from Strava or Garmin (15 min to 4 h, or off) |
 | Daily | Refresh the Zwift login |
 | Hourly | Read the Apple Health sensors from Home Assistant, if set up (local, free) |
+| Every 3 hours | Read health data from Garmin, if that's your health source |
 | Daily 07:00 | Push today's session to your notify service |
 | After each new ride | The coach's feedback, sent as a notification (needs a Claude API key; about $0.001 a ride) |
 | First visit each day | The coach's daily check-in in the chat (needs a Claude API key; about $0.001 a day) |
@@ -170,19 +203,19 @@ total.
 Each Zwift session carries on-screen messages in the coach's voice: the coach's own cues through the
 workout, plus a rep counter with a cheer on every interval rep.
 
-**Send to Zwift.** Connect your Zwift account under **Settings → Zwift**. Your password is used once to
+**Send to Zwift.** Connect your Zwift account under **Profile → Connections → Zwift**. Your password is used once to
 sign in and is not stored. Upcoming Zwift sessions on the **Plan** page then get a **Send to Zwift** button.
 **Restart Zwift** afterwards; the workout appears under *Workouts → Custom Workouts → Training Coach*.
 Sending again replaces the workout. Zwift has no public API for this, so the add-on uses the same file
 sync the Zwift app uses. If Zwift changes it, the button reports an error, and the download below still works.
-If the login expires, Settings asks you to sign in again.
+If the login expires, Profile asks you to sign in again.
 
 **Download .zwo.** You can always save the file to `Documents/Zwift/Workouts/<your Zwift id>/` yourself
 instead.
 
 ## Several athletes
 
-Other Home Assistant users can have their own Training Coach: their own Strava and Zwift accounts, Profile
+Other Home Assistant users can have their own Training Coach: their own Strava or Garmin and Zwift accounts, Profile
 (training days, hours per session, goals), plan, coach chat, Apple Health and notifications. Home Assistant's owner
 (the user who set HA up) owns the add-on and decides who gets in.
 
@@ -191,11 +224,13 @@ Other Home Assistant users can have their own Training Coach: their own Strava a
    **Settings → Athletes**, which also shows what each athlete's Claude calls cost this month.
 3. They install the Home Assistant iPhone app and sign in **as themselves**. Their phone is then theirs in the add-on:
    only its notify service and Apple Health sensors can be picked on their Settings and Profile.
-4. They connect their own Strava on Settings. That goes through your Strava API app: raise its athlete capacity
-   from 1 to 10 on [strava.com/settings/api](https://www.strava.com/settings/api) (no review needed). Its rate limit is
-   shared by everyone. An athlete can enter their own Strava API app instead.
+4. They connect their own rides on **Profile → Connections**: Garmin with their own key, or Strava. Strava goes
+   through your Strava API app: raise its athlete capacity from 1 to 10 on
+   [strava.com/settings/api](https://www.strava.com/settings/api) (no review needed). Its rate limit is shared by
+   everyone. An athlete can enter their own Strava API app on Settings instead.
 
 What's shared: your Claude API key (they can't see or change it) and, unless they set their own, the Strava app.
+A Garmin key is always the athlete's own.
 What isn't: everything else. Removing an athlete keeps their data, so approving them again brings it back.
 
 **Home Assistant has no per-user permissions.** Hiding dashboards ("Visible only to admins") is cosmetic. A normal
