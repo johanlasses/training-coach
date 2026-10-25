@@ -4,3 +4,4 @@ pytest-asyncio
 respx
 playwright
 ruff
+websockets

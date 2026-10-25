@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import hashlib
 import logging
+import os
 import time
 import xml.etree.ElementTree as ET
 
@@ -23,8 +24,9 @@ from .db import DB
 
 log = logging.getLogger(__name__)
 
-TOKEN_URL = "https://secure.zwift.com/auth/realms/zwift/protocol/openid-connect/token"
-API = "https://us-or-rly101.zwift.com/api"
+# TC_ZWIFT_AUTH_URL / TC_ZWIFT_API_URL point the app at a fake Zwift (dev/ stack); unset in production
+TOKEN_URL = os.environ.get("TC_ZWIFT_AUTH_URL", "https://secure.zwift.com/auth/realms/zwift/protocol/openid-connect/token")
+API = os.environ.get("TC_ZWIFT_API_URL", "https://us-or-rly101.zwift.com/api")
 CLIENT_ID = "Zwift Game Client"
 COMPANION_CLIENT_ID = "Zwift_Mobile_Link"  # fallback if Zwift stops accepting the game's client for this grant
 FOLDER = "customworkouts"

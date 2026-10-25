@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import logging
+import os
 import time
 from datetime import datetime, timedelta, timezone
 from urllib.parse import parse_qs, urlencode, urlparse
@@ -12,8 +13,10 @@ from .db import DB
 
 log = logging.getLogger(__name__)
 
-API = "https://www.strava.com/api/v3"
-TOKEN_URL = "https://www.strava.com/oauth/token"
+# TC_STRAVA_URL points the app at a fake Strava (dev/ stack); unset in production
+BASE = os.environ.get("TC_STRAVA_URL", "https://www.strava.com").rstrip("/")
+API = f"{BASE}/api/v3"
+TOKEN_URL = f"{BASE}/oauth/token"
 
 # Strava redirects here after approval. Nothing listens on it: the user copies the URL from the
 # address bar back into the Settings page. Works without configuring a callback domain for HA.
@@ -52,7 +55,7 @@ class StravaClient:
         return self.has_app and bool((self.db.get("strava_token") or {}).get("refresh_token"))
 
     def authorize_url(self) -> str:
-        return "https://www.strava.com/oauth/authorize?" + urlencode({
+        return f"{BASE}/oauth/authorize?" + urlencode({
             "client_id": self.client_id, "response_type": "code", "redirect_uri": REDIRECT_URI,
             "approval_prompt": "force", "scope": SCOPES,
         })

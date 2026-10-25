@@ -126,3 +126,16 @@ def test_scheduler_never_starts_llm_jobs(client, monkeypatch):
         import asyncio
         asyncio.run(st.scheduler())
     assert "plan" not in started and "analysis" not in started
+
+
+def test_external_urls_default_to_the_real_services():
+    """TC_STRAVA_URL / TC_ZWIFT_* only exist for the dev/ stack: unset, the app talks to the real APIs.
+    A subprocess, because reloading the modules would break class identity for the other tests."""
+    import os
+    import subprocess
+    import sys
+    env = {k: v for k, v in os.environ.items() if not k.startswith("TC_")}
+    code = "from app import strava, zwift; print(strava.API, strava.TOKEN_URL, zwift.API, zwift.TOKEN_URL)"
+    out = subprocess.run([sys.executable, "-c", code], cwd="training_coach", env=env, capture_output=True, text=True, check=True).stdout.split()
+    assert out[:3] == ["https://www.strava.com/api/v3", "https://www.strava.com/oauth/token", "https://us-or-rly101.zwift.com/api"]
+    assert out[3].startswith("https://secure.zwift.com/")

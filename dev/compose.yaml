@@ -1,0 +1,65 @@
+# Local stand-in for the Home Assistant box. `dev/devha.sh up` builds and starts it.
+# The add-on image is built from the production Dockerfile and base image, and talks to a fake Supervisor.
+name: tc-dev
+services:
+  addon:
+    build:
+      context: ../training_coach
+      args:
+        BUILD_FROM: ${BUILD_FROM:-ghcr.io/home-assistant/aarch64-base-python:3.13-alpine3.24}
+    hostname: local-training-coach  # Supervisor names the container like this: ha.addon_slug() reads it
+    environment:
+      SUPERVISOR_TOKEN: dev-supervisor-token
+      TZ: Europe/Stockholm
+      ANTHROPIC_API_KEY: sk-ant-dev-fake
+      ANTHROPIC_BASE_URL: http://fakes:8002
+      TC_STRAVA_URL: http://fakes:8001
+      TC_ZWIFT_AUTH_URL: http://fakes:8003/token
+      TC_ZWIFT_API_URL: http://fakes:8003/api
+    volumes:
+      - addon-data:/data
+    networks: [internal]  # no internet and no published port: reachable only through the fake ingress
+    depends_on: [fakes]
+
+  fakes:
+    build:
+      context: fakes
+      args:
+        BUILD_FROM: ${BUILD_FROM:-ghcr.io/home-assistant/aarch64-base-python:3.13-alpine3.24}
+    environment:
+      SUPERVISOR_TOKEN: dev-supervisor-token
+    volumes:
+      - ./.state:/state
+      - ../training_coach:/opt/app_src:ro
+    ports:
+      - "8124:80"    # ingress: http://localhost:8124/api/hassio_ingress/dev/ (and the push sink at /_dev/push)
+      - "8101:8001"  # fake Strava controls (/_dev/*)
+      - "8102:8002"  # fake Anthropic controls and request log
+      - "8103:8003"  # fake Zwift (/_dev/files)
+    networks:
+      internal:
+        aliases: [supervisor]
+      edge:
+
+  homeassistant:
+    image: ghcr.io/home-assistant/home-assistant:${HA_VERSION:-stable}
+    environment: {TZ: Europe/Stockholm}
+    volumes:
+      - ./.state/ha:/config
+      - ./homeassistant/configuration.yaml:/config/configuration.yaml:ro
+    ports: ["8123:8123"]
+    networks: [internal, edge]
+
+  mosquitto:
+    image: eclipse-mosquitto:2
+    volumes:
+      - ./mosquitto/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
+      - ./mosquitto/passwd:/mosquitto/config/passwd
+    networks: [internal]
+
+networks:
+  internal: {internal: true}
+  edge: {}
+
+volumes:
+  addon-data:

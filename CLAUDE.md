@@ -14,6 +14,8 @@ TC_DATA_DIR=/tmp/tc-demo .venv/bin/python tools/seed_demo.py    # demo data, no 
 .venv/bin/ruff check training_coach tests tools                 # bugs-only lint (no formatter: the style is compact on purpose)
 ```
 
+Local HA stack (Docker; the real HA box may be unreachable): `dev/devha.sh up`, then `.venv/bin/python dev/smoke.py`. See the `local-ha` skill.
+
 Project hooks (`.claude/hooks/`): pytest after edits under `training_coach/app/` or `tests/`; ruff and the template rules
 (`{{ base }}` URLs, no inline grid styles) after each edit; blocks on plain `git push`, persisted git credentials and
 `options:` in `config.yaml`; a Stop reminder when templates/CSS changed without a `mobile_check.py` run.
@@ -42,6 +44,8 @@ CI (`.github/workflows/test.yml`) runs ruff and pytest on push.
 - **Strava rate limits:** stream fetches are capped per sync run and stop near the 15-minute limit. Keep it that way.
   Tests never hit real APIs.
 - **Charts:** use the colour tokens in `static/app.css` (the dataviz reference palette). No dual axes; TSB has its own chart.
+- **Verify changes that touch HA, Strava, Claude, MQTT, notifications or ingress with the `local-ha` skill** (`dev/smoke.py`), not just pytest.
+  Extend the smoke test and the fakes in `dev/` with the feature.
 - After changing `metrics.py`, `coach.py` rules or prompts, or `analysis.py`, run the `training-science-reviewer` agent.
 - After changing `main.py`, `config.py`, templates or the Strava/HA/Zwift clients, run the `ha-addon-reviewer` agent.
 - When the deployed add-on misbehaves, use the `ha-logs` skill to get the traceback before guessing.

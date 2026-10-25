@@ -5,3 +5,6 @@ __pycache__/
 data/
 .pytest_cache/
 .shots/
+dev/.state/
+dev/mosquitto/passwd
+dev/fakes/certs/*.pem
