@@ -85,7 +85,13 @@ def test_summary_maps_onto_stravas_sport_types():
     assert summary_from_garmin(activity(8, "gravel_cycling"))["sport_type"] == "GravelRide"
     assert summary_from_garmin(activity(9, "indoor_cycling"))["trainer"] == 1
     walk = summary_from_garmin(activity(10, "walking", power=False))
-    assert walk["sport_type"] == "Other" and walk["device_watts"] == 0 and walk["kilojoules"] is None
+    assert walk["sport_type"] == "Walk" and walk["device_watts"] == 0 and walk["kilojoules"] is None
+    assert summary_from_garmin(activity(11, "hiking"))["sport_type"] == "Hike"
+    assert summary_from_garmin(activity(12, "trail_running"))["sport_type"] == "TrailRun"
+    treadmill = summary_from_garmin(activity(13, "treadmill_running"))
+    assert (treadmill["sport_type"], treadmill["trainer"]) == ("Run", 1)
+    assert summary_from_garmin(activity(14, "virtual_run"))["sport_type"] == "VirtualRun"
+    assert summary_from_garmin(activity(15, "yoga"))["sport_type"] == "Other"
 
 
 def test_fit_streams_read_power_and_heart_rate_from_the_zipped_download():
@@ -140,20 +146,23 @@ async def test_rate_limit_is_rate_limited(db):
         await g.check()
 
 
-async def test_sync_from_garmin_imports_rides_only_with_streams(db):
+async def test_sync_from_garmin_imports_rides_and_walks_with_streams(db):
     fit = fit_records(datetime(2026, 10, 20, 6, tzinfo=timezone.utc), [250] * 3600, [140] * 3600)
     first = datetime(2026, 6, 1, 6)
     acts = [activity(i, start=(first + timedelta(days=i)).strftime("%Y-%m-%d %H:%M:%S")) for i in range(1, 121)] + [
-        activity(500, "walking", power=False)]
+        activity(500, "walking", power=False), activity(501, "yoga", power=False)]
     fake = FakeGarmin(acts, zipped(fit))
     result = await sync(db, client(db, fake), Config(lthr=165))
-    assert result["listed"] == 120 and len(db.activities()) == 120  # the walk stays out until 0.11
+    assert result["listed"] == 121 and len(db.activities()) == 121  # the walk is kept, yoga isn't
     pages = [c[2]["start"] for c in fake.calls if c[1].endswith("/search/activities")]
-    # Until an empty page (Garmin's max page size isn't documented): 100, 21, then nothing
-    assert pages == ["0", "100", "121"] and all("activityType" not in c[2] for c in fake.calls)
+    # Until an empty page (Garmin's max page size isn't documented): 100, 22, then nothing
+    assert pages == ["0", "100", "122"] and all("activityType" not in c[2] for c in fake.calls)
     streamed = [a for a in db.activities() if a["streams_fetched"]]
-    assert len(streamed) == 40 and result["pending_streams"] == 80  # capped per run, like Strava
-    assert round(streamed[0]["np"]) == 250 and streamed[0]["tss_source"] == "power"
+    assert len(streamed) == 40 and result["pending_streams"] == 80  # capped per run, like Strava; walks never wait
+    ride = next(a for a in streamed if a["sport_type"] != "Walk")
+    assert round(ride["np"]) == 250 and ride["tss_source"] == "power"
+    walk = db.activity(500)
+    assert not walk["streams_fetched"] and walk["tss_source"] == "estimate"  # walks: a flat 20 TSS/h, no stream call
 
 
 async def test_an_unreadable_download_gives_no_streams_instead_of_stopping_sync(db):

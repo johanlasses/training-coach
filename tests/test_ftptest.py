@@ -148,7 +148,7 @@ def test_a_test_sets_ftp_from_its_date_only():
 
     from app.sync import ftp_at
     tests = [{"date": "2026-10-15", "ftp": 300, "protocol": "ramp"}]
-    acts = [{"start_date_local": "2026-09-01T10:00:00", "mmp": {1200: 263}}]  # eFTP 250
+    acts = [{"start_date_local": "2026-09-01T10:00:00", "sport_type": "Ride", "mmp": {1200: 263}}]  # eFTP 250
     assert ftp_at(acts, date(2026, 10, 14), 0, tests) == (250, "eftp")   # before the test: unchanged
     assert ftp_at(acts, date(2026, 10, 15), 0, tests) == (300, "test")
     assert ftp_at(acts, date(2027, 1, 7), 0, tests) == (300, "test")     # 12 weeks later

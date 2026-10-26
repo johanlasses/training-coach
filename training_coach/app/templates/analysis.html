@@ -10,7 +10,7 @@
       </div>
       <form method="post" action="{{ base }}/analysis" class="plan-action">
         {% set running = jobs.analysis and jobs.analysis.running %}
-        <button {{ 'disabled' if not ai_ok or running }}>{{ 'Analysing…' if running else 'Analyse with ' ~ (default_coach | coach_short) }}</button>
+        <button {{ 'disabled' if not ai_ok or running }}>{{ 'Analysing…' if running else 'Analyse with ' ~ (analysis_coach | coach_short) }}</button>
       </form>
     </div>
     {% if not ai_ok %}<div class="notice error">Add your Claude API key in <a href="{{ base }}/settings">Settings</a> to enable analysis.</div>{% endif %}

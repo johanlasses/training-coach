@@ -49,7 +49,7 @@ Setup steps are in [training_coach/DOCS.md](training_coach/DOCS.md).
 - **Overview status** (`app/overview.py`): form, week vs plan, CTL/FTP trend and the next event, from plain numbers.
   The gauges (`overview.gauges`) are server-rendered SVG; their health bands come from `health.READINESS`, the
   thresholds `coach.HEALTH_RULES` is written from.
-- **Models** (`llm.MODELS`): Opus for plan and analysis, Sonnet for chat, Haiku for ride feedback and the check-in.
+- **Models** (`llm.MODELS`): Sonnet (high effort) for plan, analysis and chat, Haiku for ride feedback and the check-in.
 - **Scheduler** (`State.scheduler` in `app/main.py`): a one-minute tick with configurable slots. Every Claude call is logged
   in `llm_calls` for the usage table.
 - **Athletes** (`Athletes`, `athlete()` in `app/main.py`): one `State` and SQLite DB per Home Assistant user, picked from

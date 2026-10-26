@@ -3,9 +3,9 @@ from __future__ import annotations
 
 from datetime import date, timedelta
 
-from . import metrics, season
+from . import coaches, metrics, season, sports
 from .config import Config, level_for_wkg
-from .sync import ftp_at
+from .sync import ftp_at, threshold_pace_at
 
 
 def _day(a: dict) -> date:
@@ -13,17 +13,26 @@ def _day(a: dict) -> date:
 
 
 def window(acts: list[dict], start: date, end: date | None = None) -> dict:
+    """Ride volume (rides, hours, km: a run's km aren't a ride's), the run and walk volume next to it, and the TSS of
+    everything: fatigue is shared."""
     end = end or date.max
-    sel = [a for a in acts if start <= _day(a) <= end]
+    every = [a for a in acts if start <= _day(a) <= end]
+    sel = sports.rides(every)
+    runs = sports.runs(every)
+    walks = [a for a in every if sports.kind(a["sport_type"]) == "walk"]
     indoor = [a for a in sel if a["trainer"] or a["sport_type"] == "VirtualRide"]
     return {
         "rides": len(sel),
         "hours": round(sum(a["moving_time"] or 0 for a in sel) / 3600, 1),
         "km": round(sum(a["distance"] or 0 for a in sel) / 1000),
         "elevation": round(sum(a["elevation_gain"] or 0 for a in sel)),
-        "tss": round(sum(a["tss"] or 0 for a in sel)),
+        "tss": round(sum(a["tss"] or 0 for a in every)),
         "indoor_rides": len(indoor),
         "indoor_hours": round(sum(a["moving_time"] or 0 for a in indoor) / 3600, 1),
+        "runs": len(runs),
+        "run_hours": round(sum(a["moving_time"] or 0 for a in runs) / 3600, 1),
+        "run_km": round(sum(a["distance"] or 0 for a in runs) / 1000, 1),
+        "walk_hours": round(sum(a["moving_time"] or 0 for a in walks) / 3600, 1),
     }
 
 
@@ -47,13 +56,13 @@ def fitness(acts: list[dict], today: date, days: int = 90) -> list[dict]:
 
 def power_curve(acts: list[dict], today: date, days: int) -> dict[int, float]:
     lo = today - timedelta(days=days)
-    return metrics.best_curve([a["mmp"] for a in acts if a.get("mmp") and _day(a) >= lo])
+    return metrics.best_curve([a["mmp"] for a in sports.rides(acts) if a.get("mmp") and _day(a) >= lo])
 
 
 def zone_distribution(acts: list[dict], today: date, days: int = 28) -> list[dict]:
     lo = today - timedelta(days=days)
     totals = [0] * len(metrics.ZONES)
-    for a in acts:
+    for a in sports.rides(acts):
         if a.get("power_hist") and _day(a) >= lo:
             for i, s in enumerate(metrics.zone_seconds(a["power_hist"], a["ftp_used"])):
                 totals[i] += s
@@ -116,13 +125,16 @@ def snapshot(acts: list[dict], today: date, cfg: Config) -> dict:
         "load": {"ctl": d["ctl"], "atl": d["atl"], "tsb": d["tsb"],
                  "ctl_4_weeks_ago": d["fitness"][-29]["ctl"] if len(d["fitness"]) >= 29 else None,
                  "ctl_ramp_per_week": round((d["ctl"] - d["fitness"][-8]["ctl"]), 1) if len(d["fitness"]) >= 8 else None},
-        "weeks": [{k: w[k] for k in ("week", "rides", "hours", "km", "tss", "indoor_hours")} for w in d["weekly"]],
+        "weeks": [{k: w[k] for k in ("week", "rides", "hours", "km", "tss", "indoor_hours")}
+                  | ({k: w[k] for k in ("runs", "run_hours", "run_km", "walk_hours")} if w["runs"] or w["walk_hours"] else {})
+                  for w in d["weekly"]],
         "power_curve_90d_w": curve,
         "power_curve_365d_w": d["curve365"],
         "ftp_trend": ftp_trend(acts, today, cfg),
         "zones_last_28d": d["zones28"],
         "recent_rides": [{
             "date": a["start_date_local"][:10], "name": a["name"], "type": a["sport_type"],
+            "sport": sports.kind(a["sport_type"]),
             "indoor": bool(a["trainer"] or a["sport_type"] == "VirtualRide"),
             "minutes": round((a["moving_time"] or 0) / 60), "km": round((a["distance"] or 0) / 1000, 1),
             "elev_m": round(a["elevation_gain"] or 0), "avg_w": a["avg_watts"], "np_w": round(a["np"]) if a.get("np") else None,
@@ -130,9 +142,77 @@ def snapshot(acts: list[dict], today: date, cfg: Config) -> dict:
             "avg_hr": a["avg_hr"], "decoupling_pct": a.get("decoupling"),
             "best_5min_w": (a.get("mmp") or {}).get(300), "best_20min_w": (a.get("mmp") or {}).get(1200),
             "maximal_effort": maximal_effort(a),
-        } for a in sorted(recent, key=lambda a: a["start_date_local"])],
+        } | ({"pace_per_km": pace(a)} if not sports.is_ride(a) else {})
+            for a in sorted(recent, key=lambda a: a["start_date_local"])],
         "season": {"phase": season.phase(today), "description": season.PHASE_TEXT[season.phase(today)],
                    "daylight_hours": hours, "sunrise": sunrise, "sunset": sunset},
         "availability": {wd: cfg.max_minutes(i) for i, wd in enumerate(
             ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"])},
+        "sports": {"primary": cfg.primary_sport, "active": cfg.active_sports(today)},
+        "running": running(acts, today, cfg),
+    }
+
+
+def pace(a: dict) -> str | None:
+    """"5:12/km" from the average speed."""
+    v = a.get("avg_speed")
+    if not v or v <= 0:
+        return None
+    secs = round(1000 / v)
+    return f"{secs // 60}:{secs % 60:02d}/km"
+
+
+def fmt_pace(secs: float | None) -> str | None:
+    return f"{int(secs) // 60}:{int(secs) % 60:02d}/km" if secs else None
+
+
+RUN_WEEKS = 8
+
+
+def run_weeks(acts: list[dict], today: date, weeks: int = RUN_WEEKS) -> list[dict]:
+    """Run minutes and km per week, oldest first, ending with the current week."""
+    ws = week_start(today)
+    out = []
+    for i in range(weeks - 1, -1, -1):
+        s = ws - timedelta(weeks=i)
+        sel = [a for a in sports.runs(acts) if s <= _day(a) <= s + timedelta(days=6)]
+        out.append({"week": s.isoformat(), "runs": len(sel), "minutes": round(sum(a["moving_time"] or 0 for a in sel) / 60),
+                    "km": round(sum(a["distance"] or 0 for a in sel) / 1000, 1)})
+    return out
+
+
+def returning(weeks: list[dict]) -> bool:
+    """In the first 2 weeks back after 4+ weeks without a run: no run in the last 4 completed weeks, or last week was
+    the first one back after 4 empty ones."""
+    done = [w["runs"] for w in weeks[:-1]]  # completed weeks, oldest first
+    return (len(done) >= 4 and not any(done[-4:])) or (len(done) >= 5 and done[-1] > 0 and not any(done[-5:-1]))
+
+
+def running(acts: list[dict], today: date, cfg: Config) -> dict:
+    """The run history and limits the durability guard (coach.run_errors), the running coach and run feedback work
+    from. Run volume is judged from running alone: cycling fitness doesn't make tendons and bones ready for impact."""
+    runs = sports.runs(acts)
+    last = max((_day(a) for a in runs), default=None)
+    weeks = run_weeks(acts, today)
+    done = weeks[:-1]  # the current week is still running
+    pace_s = threshold_pace_at(acts, today, cfg)
+    avg_min = round(sum(w["minutes"] for w in done[-4:]) / 4)
+    avg_km = round(sum(w["km"] for w in done[-4:]) / 4, 1)
+    # Return-to-run floor from running history, not cycling level: ~3 × 20 min run/walk after 12 weeks without a run
+    ran_12w = any(week_start(today) - timedelta(weeks=12) <= _day(a) < week_start(today) for a in runs)
+    longest = max(((a["moving_time"] or 0) / 60 for a in runs if today - timedelta(days=30) <= _day(a) < today), default=0)
+    run_coach = coaches.get(cfg.running_coach, "running")
+    return {
+        "weeks": weeks,
+        "avg_minutes_last_4_weeks": avg_min, "avg_km_last_4_weeks": avg_km,
+        "cap_minutes": round(max(avg_min * 1.1, 90 if ran_12w else 60)),
+        "longest_run_min_30d": round(longest), "longest_run_cap_min": round(max(longest * 1.1, 30)),
+        "returning": returning(weeks),
+        # 3 hard runs only with the volume for double threshold (~75 km a week), else at most 2
+        "max_hard_runs": min(run_coach.rules(cfg.athlete_level)["max_hard_sessions"], 3 if avg_km >= 75 else 2),
+        "last_run": last.isoformat() if last else None,
+        "weeks_since_last_run": (today - last).days // 7 if last else None,
+        "threshold_pace": fmt_pace(pace_s), "threshold_pace_source": "profile" if cfg.threshold_pace else "estimated" if pace_s else None,
+        "threshold_hr": cfg.run_threshold_hr, "threshold_hr_source": "profile" if cfg.run_lthr else "cycling LTHR + 5",
+        "dark_runs_ok": cfg.run_in_dark,
     }

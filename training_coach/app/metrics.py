@@ -66,9 +66,28 @@ def tss_from_hr(seconds: float, avg_hr: float, lthr: float) -> tuple[float, floa
     return seconds / 3600 * intensity**2 * 100, intensity
 
 
-def estimate_tss(seconds: float) -> float:
-    """No power, no HR: assume an endurance ride (~IF 0.7 → 49 TSS/h)."""
-    return seconds / 3600 * 49
+def estimate_tss(seconds: float, per_hour: float = 49) -> float:
+    """No power, no HR: assume an endurance ride (~IF 0.7 → 49 TSS/h); runs and walks pass their own rate."""
+    return seconds / 3600 * per_hour
+
+
+def tss_from_pace(seconds: float, avg_speed: float, threshold_pace_s: float) -> tuple[float, float]:
+    """rTSS from average pace: hours * (threshold pace / pace)^2 * 100, i.e. IF is speed over threshold speed. No grade
+    adjustment (Strava's summary has no NGP), so hilly and trail runs read low: hrTSS goes first when there's HR."""
+    intensity = avg_speed * threshold_pace_s / 1000
+    return seconds / 3600 * intensity**2 * 100, intensity
+
+
+RIEGEL = 1.06  # T2 = T1 × (D2/D1)^1.06: race time over another distance
+
+
+def threshold_pace(runs: list[tuple[float, float]]) -> float | None:
+    """Threshold pace (s/km) estimated from (moving seconds, average m/s) of recent runs of 20-60 min: each run's speed
+    scaled to a one-hour effort with Riegel's formula (a 20-min 5 km is ~6% faster than threshold), the fastest of them
+    taken. Without hard efforts it reads slow, so pace-based intensity reads high. None without such runs."""
+    speeds = [v * (secs / 3600) ** ((RIEGEL - 1) / RIEGEL)
+              for secs, v in runs if 1200 <= secs <= 3600 and v and v > 1.5]  # slower than 11:00/km is walking
+    return round(1000 / max(speeds)) if speeds else None
 
 
 def mmp(watts: list[float], durations: list[int] = MMP_DURATIONS) -> dict[int, float]:

@@ -127,8 +127,8 @@
 <section class="card">
   <h2>Claude usage</h2>
   <p class="caption">{% if not is_owner %}Claude runs on {{ owner_name }}'s API key. {% endif %}Tokens per call type. Input includes cached tokens. Cost is an estimate from list prices.
-    Plan and analysis run on Opus (they need the reasoning), chat on Sonnet, and ride feedback on Haiku (it runs
-    after every ride).</p>
+    Plan, analysis and chat run on Sonnet (plan and analysis at high effort), and ride feedback and the daily check-in
+    on Haiku (they run every day).</p>
   {% for period, rows in usage.items() %}
   <h3>{{ period }}</h3>
   {% if rows %}

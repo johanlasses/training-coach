@@ -33,12 +33,24 @@ def make_ride(aid: int, start: datetime, kind: int) -> dict:
             "n": n}
 
 
+def make_run(aid: int, start: datetime, sport: str = "Run", minutes: int = 35) -> dict:
+    """A run (or walk): HR only, like a watch without a foot pod. Runs sync since 0.11.0."""
+    n = minutes * 60
+    base = 100 if sport == "Walk" else 145
+    return {"id": aid, "name": {"Run": "Morning run", "TrailRun": "Trail run", "Walk": "Lunch walk"}[sport],
+            "sport_type": sport, "type": sport, "start": start, "watts": [0.0] * n, "hr": [base + i / n * 8 for i in range(n)],
+            "n": n, "speed": 1.5 if sport == "Walk" else 2.9}
+
+
 def history() -> list[dict]:
     rnd = random.Random(7)
     rides, today = [], datetime.now(timezone.utc).replace(hour=16, minute=0, second=0, microsecond=0)
     aid = 5000
     for back in range(HISTORY_DAYS, 0, -1):
         d = today - timedelta(days=back)
+        if back % 5 == 0:  # a run every fifth morning, a walk now and then: some days hold a ride too
+            aid += 1
+            rides.append(make_run(aid, d.replace(hour=6), "Walk" if back % 15 == 0 else "TrailRun" if back % 10 == 0 else "Run"))
         if rnd.random() < 0.45:
             continue
         aid += 1
@@ -53,14 +65,15 @@ def all_rides() -> list[dict]:
 def summary(r: dict) -> dict:
     w, n = r["watts"], r["n"]
     start = r["start"]
+    speed, power = r.get("speed", 8.3), any(w)
     return {"id": r["id"], "name": r["name"], "sport_type": r["sport_type"], "type": r["type"],
             "start_date": start.strftime("%Y-%m-%dT%H:%M:%SZ"),
             "start_date_local": start.strftime("%Y-%m-%dT%H:%M:%SZ"),  # Strava's "local" has a fake Z too
-            "distance": n / 3600 * 30000, "moving_time": n, "elapsed_time": n + 60, "total_elevation_gain": 200,
-            "trainer": r["sport_type"] == "VirtualRide", "average_watts": sum(w) / n,
-            "weighted_average_watts": None, "max_watts": max(w), "device_watts": True,
-            "average_heartrate": sum(r["hr"]) / n, "max_heartrate": max(r["hr"]), "kilojoules": sum(w) / 1000,
-            "average_speed": 8.3}
+            "distance": n * speed, "moving_time": n, "elapsed_time": n + 60, "total_elevation_gain": 200,
+            "trainer": r["sport_type"] == "VirtualRide", "average_watts": sum(w) / n if power else None,
+            "weighted_average_watts": None, "max_watts": max(w) if power else None, "device_watts": power,
+            "average_heartrate": sum(r["hr"]) / n, "max_heartrate": max(r["hr"]), "kilojoules": sum(w) / 1000 if power else None,
+            "average_speed": speed}
 
 
 def headers() -> dict:
@@ -113,15 +126,21 @@ def streams(aid: int):
     if not ride:
         return JSONResponse({"message": "Record Not Found"}, status_code=404, headers=headers())
     n = ride["n"]
-    return JSONResponse({"time": {"data": list(range(n))}, "watts": {"data": [round(w) for w in ride["watts"]]},
-                         "heartrate": {"data": [round(h) for h in ride["hr"]]}}, headers=headers())
+    out = {"time": {"data": list(range(n))}, "heartrate": {"data": [round(h) for h in ride["hr"]]}}
+    if any(ride["watts"]):
+        out["watts"] = {"data": [round(w) for w in ride["watts"]]}
+    return JSONResponse(out, headers=headers())
 
 
 @app.post("/_dev/ride")
-def add_ride(kind: int = 0, minutes_ago: int = 30):
-    """A ride that finished `minutes_ago` minutes ago (as the athlete would see after a Zwift session)."""
+def add_ride(kind: int = 0, minutes_ago: int = 30, sport: str = ""):
+    """A ride that finished `minutes_ago` minutes ago (as the athlete would see after a Zwift session); with
+    sport=Run|TrailRun|Walk a run or walk instead."""
     aid = 9000 + len(state["extra"])
-    ride = make_ride(aid, datetime.now(timezone.utc) - timedelta(minutes=minutes_ago + KINDS[kind][2]), kind)
+    if sport:
+        ride = make_run(aid, datetime.now(timezone.utc) - timedelta(minutes=minutes_ago + 35), sport)
+    else:
+        ride = make_ride(aid, datetime.now(timezone.utc) - timedelta(minutes=minutes_ago + KINDS[kind][2]), kind)
     state["extra"].append(ride)
     return {"id": aid, "name": ride["name"]}
 

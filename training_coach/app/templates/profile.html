@@ -19,14 +19,41 @@
   </div>
 </section>
 
-<section class="card">
-  <h2>Default coach</h2>
-  <p class="caption">Your coach. Switching hands the chat and ride feedback to the new coach right away; this week's
-    plan stays until you generate a new one. On Plan and Analysis you can still run any coach.</p>
-  {% for c in coaches.values() %}
-  <label class="choice"><input type="radio" name="default_coach" value="{{ c.key }}" {{ 'checked' if c.key == cfg.default_coach }}>
-    <span>{{ c.name }}<small>{{ c.summary }}</small></span></label>
+<section class="card" id="sports">
+  <h2>Sports</h2>
+  <p class="caption">Each active sport has its own coach. With both active, the primary sport's coach plans first and the
+    other plans around it. Put a sport on hold when you can't do it (the bike stays home on a trip), or give it an end date
+    and it goes back on hold by itself. At least one sport stays active; when an end date puts the last one on hold,
+    your primary sport comes back.</p>
+  <input type="hidden" name="_section" value="sports">
+  {% for sport, label in sport_names.items() %}
+  <div class="sport-block">
+    <div class="sport-head">
+      <h3>{{ label }}</h3>
+      <label class="inline"><input type="checkbox" name="{{ sport }}_active" {{ 'checked' if cfg[sport ~ '_active'] }}> Active</label>
+      <span class="facts">{{ 'On now' if sport in active_now else 'On hold' }}</span>
+    </div>
+    <label>Active until <input type="date" name="{{ sport }}_until" value="{{ cfg[sport ~ '_until'] }}">
+      <small>Optional. After this day {{ label | lower }} goes back on hold.</small></label>
+    {% for c in coaches_by_sport[sport] %}
+    <label class="choice"><input type="radio" name="{{ sport }}_coach" value="{{ c.key }}" {{ 'checked' if c.key == cfg[sport ~ '_coach'] }}>
+      <span>{{ c.name }}<small>{{ c.summary }}</small></span></label>
+    {% endfor %}
+  </div>
   {% endfor %}
+  <label>Primary sport <select name="primary_sport">
+    {% for sport, label in sport_names.items() %}<option value="{{ sport }}" {{ 'selected' if sport == cfg.primary_sport }}>{{ label }}</option>{% endfor %}
+  </select><small>Its coach plans first, writes the daily check-in when both sports had a session, and writes the analysis.</small></label>
+  <h3>Running thresholds</h3>
+  <div class="grid2">
+    <label>Threshold pace (min/km) <input name="threshold_pace" value="{{ pace_value }}" placeholder="{{ (running.threshold_pace or 'e.g. 4:45/km') | replace('/km', '') }}" autocomplete="off">
+      <small>{% if cfg.threshold_pace %}Your setting.{% elif running.threshold_pace %}Empty: estimated {{ running.threshold_pace }} from your fastest 20–60 min runs.{% else %}What you could race for about an hour. Empty: estimated from your runs.{% endif %}</small></label>
+    <label>Running threshold HR (bpm) <input name="run_lthr" value="{{ cfg.run_lthr or '' }}" inputmode="numeric" placeholder="{{ cfg.lthr + 5 }}">
+      <small>Empty: your cycling threshold HR + 5 (running's is usually 5–10 beats higher). A 30-min solo run's
+        average HR over the last 20 min sets it properly.</small></label>
+  </div>
+  <label class="inline"><input type="checkbox" name="run_in_dark" {{ 'checked' if cfg.run_in_dark }}> I run outdoors in the dark (head torch); otherwise evening runs go on the treadmill</label>
+  {% if running.last_run %}<p class="facts">Last 4 weeks: {{ running.avg_minutes_last_4_weeks }} min and {{ running.avg_km_last_4_weeks }} km of running a week on average.</p>{% endif %}
 </section>
 
 <section class="card">

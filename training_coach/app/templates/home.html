@@ -40,12 +40,12 @@
   <section class="rides">
     <h2 class="section-title">Rides</h2>
     {% if latest %}
-      {{ ride_card(latest, planned.get(latest.start_date_local[:10]), latest=True) }}
+      {{ ride_card(latest, planned.get(latest.id), latest=True) }}
       {% if not latest.feedback and feedback_running %}<p class="muted">The coach is writing feedback on this ride…</p>{% endif %}
-      {% for a in feed[:5] %}{{ ride_card(a, planned.get(a.start_date_local[:10])) }}{% endfor %}
+      {% for a in feed[:5] %}{{ ride_card(a, planned.get(a.id)) }}{% endfor %}
       {% if feed | length > 5 %}
       <details class="more-rides"><summary>Older rides ({{ feed | length - 5 }})</summary>
-        {% for a in feed[5:] %}{{ ride_card(a, planned.get(a.start_date_local[:10]), visual=False) }}{% endfor %}
+        {% for a in feed[5:] %}{{ ride_card(a, planned.get(a.id), visual=False) }}{% endfor %}
       </details>
       {% endif %}
     {% else %}
@@ -57,9 +57,9 @@
     <h2 class="section-title">Trends</h2>
     <div class="tiles">
       <div class="tile"><div class="label">This week</div><div class="value">{{ d.this_week.hours }} <small>h</small></div>
-        <div class="sub">{{ d.this_week.km }} km · {{ d.this_week.rides }} rides</div></div>
+        <div class="sub">{{ d.this_week.km }} km · {{ d.this_week.rides }} rides{% if d.this_week.runs %} · {{ d.this_week.runs }} run{{ 's' if d.this_week.runs != 1 }}, {{ d.this_week.run_km }} km{% endif %}</div></div>
       <div class="tile"><div class="label">Last 7 days</div><div class="value">{{ d.last7.rides }} <small>rides</small></div>
-        <div class="sub">{{ d.last7.hours }} h · {{ d.last7.km }} km</div></div>
+        <div class="sub">{{ d.last7.hours }} h · {{ d.last7.km }} km{% if d.last7.runs %} · {{ d.last7.runs }} run{{ 's' if d.last7.runs != 1 }}{% endif %}</div></div>
       <div class="tile"><div class="label">Last 30 days</div><div class="value">{{ d.last30.rides }} <small>rides</small></div>
         <div class="sub">{{ d.last30.hours }} h · {{ d.last30.indoor_rides }} indoor</div></div>
       <div class="tile"><div class="label">Year to date</div><div class="value">{{ '{:,}'.format(d.ytd.km).replace(',', ' ') }} <small>km</small></div>

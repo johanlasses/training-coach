@@ -1,5 +1,9 @@
 {% macro ride_type(a) -%}
-  {%- if a.sport_type == 'VirtualRide' -%}{{ 'Zwift' if 'zwift' in (a.name or '') | lower else 'Virtual ride' }}
+  {%- if a.sport_type == 'TrailRun' -%}Trail run
+  {%- elif a.sport_type == 'VirtualRun' or (a.sport_type == 'Run' and a.trainer) -%}Treadmill
+  {%- elif a.sport_type == 'Run' -%}Run
+  {%- elif a.sport_type in ('Walk', 'Hike') -%}{{ a.sport_type }}
+  {%- elif a.sport_type == 'VirtualRide' -%}{{ 'Zwift' if 'zwift' in (a.name or '') | lower else 'Virtual ride' }}
   {%- elif a.sport_type == 'GravelRide' -%}Gravel
   {%- elif a.sport_type == 'MountainBikeRide' -%}MTB
   {%- elif a.trainer -%}Indoor
@@ -59,7 +63,8 @@
     <div><b>{{ ((a.distance or 0) / 1000) | round(1) }} km</b>Distance</div>
     <div><b>{{ a.moving_time | duration }}</b>Time</div>
     {% if a.elevation_gain %}<div><b>{{ a.elevation_gain | round | int }} m</b>Elevation</div>{% endif %}
-    {% if a.np %}<div><b>{{ a.np | round | int }} W</b>NP</div>{% elif a.avg_watts %}<div><b>{{ a.avg_watts | round | int }} W</b>Avg power</div>{% endif %}
+    {% if not (a | is_ride) %}{% if a | pace %}<div><b>{{ a | pace }}</b>Pace</div>{% endif %}
+    {% elif a.np %}<div><b>{{ a.np | round | int }} W</b>NP</div>{% elif a.avg_watts %}<div><b>{{ a.avg_watts | round | int }} W</b>Avg power</div>{% endif %}
     {% if a.tss %}<div><b>{{ a.tss | round | int }}</b>TSS{% if a.tss_source != 'power' %} ({{ a.tss_source }}){% endif %}</div>{% endif %}
     {% if a.avg_hr %}<div><b>{{ a.avg_hr | round | int }}</b>Avg HR</div>{% endif %}
   </div>

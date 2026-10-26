@@ -7,8 +7,11 @@ from __future__ import annotations
 
 import os
 from dataclasses import asdict, dataclass, field, fields
+from datetime import date
 from pathlib import Path
 from typing import TYPE_CHECKING
+
+from .sports import SPORTS
 
 if TYPE_CHECKING:
     from .db import DB
@@ -53,7 +56,18 @@ class Config:
     goals: str = ""
     athlete_level: str = "intermediate"
     sessions_per_week: int = 5
-    default_coach: str = "nextlevel"
+    # Sports (Profile → Sports). The primary sport's coach plans first; with both active, the other one fills in.
+    # A sport with an "until" date goes back on hold after that day; with neither active, the primary is.
+    primary_sport: str = "cycling"
+    cycling_coach: str = "nextlevel"  # default_coach before 0.11.0, migrated in load_config
+    cycling_active: bool = True
+    cycling_until: str = ""
+    running_coach: str = "runnextlevel"
+    running_active: bool = False
+    running_until: str = ""
+    run_lthr: int = 0          # 0 = the cycling LTHR + 5
+    threshold_pace: int = 0    # s/km; 0 = estimated from recent runs
+    run_in_dark: bool = False  # outdoor runs after sunset (a head torch); otherwise the treadmill
     # Schedules (Settings → Schedules & API usage). Claude jobs are off until switched on.
     sync_interval_min: int = 30           # 0 = off
     zwift_refresh: bool = True
@@ -82,15 +96,36 @@ class Config:
             return 0
         return self.max_weekend_minutes if weekday >= 5 else self.max_weekday_minutes
 
+    def sport_on(self, sport: str, day: date) -> bool:
+        """Switched on for that day: active, and the "until" date (if any) not passed."""
+        until = getattr(self, f"{sport}_until")
+        return getattr(self, f"{sport}_active") and (not until or day.isoformat() <= until)
+
+    def active_sports(self, day: date) -> list[str]:
+        """The sports to plan that day, primary first. Never empty: with both on hold the primary sport is back."""
+        order = [self.primary_sport] + [s for s in SPORTS if s != self.primary_sport]
+        return [s for s in order if self.sport_on(s, day)] or [self.primary_sport]
+
+    def coach_key(self, sport: str) -> str:
+        return self.running_coach if sport == "running" else self.cycling_coach
+
+    @property
+    def run_threshold_hr(self) -> int:
+        """Running LTHR is usually 5-10 bpm above cycling's (more muscle mass working): cycling's + 5 until it's set."""
+        return self.run_lthr or self.lthr + 5
+
 
 FIELD_TYPES = {f.name: f.type for f in fields(Config)}
 
 
-VALID_CHOICES = {"activity_source": ACTIVITY_SOURCES, "health_source": HEALTH_SOURCES, "workout_app": WORKOUT_APPS}
+VALID_CHOICES = {"activity_source": ACTIVITY_SOURCES, "health_source": HEALTH_SOURCES, "workout_app": WORKOUT_APPS,
+                 "primary_sport": SPORTS}
 
 
 def load_config(db: DB) -> Config:
     stored = db.get("settings") or {}
+    if "default_coach" in stored and "cycling_coach" not in stored:  # renamed in 0.11.0
+        stored = stored | {"cycling_coach": stored["default_coach"]}
     cfg = Config(**{k: v for k, v in stored.items() if k in FIELD_TYPES})
     if not cfg.anthropic_api_key:
         cfg.anthropic_api_key = os.environ.get("ANTHROPIC_API_KEY", "")

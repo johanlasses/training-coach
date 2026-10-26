@@ -196,7 +196,14 @@ def strava_sync() -> None:
         post("/sync")
     acts = dbq("SELECT * FROM activities")
     check(len(acts) >= 20, f"rides imported ({len(acts)})")
-    check(all(a["streams_fetched"] and a["tss"] is not None and a["ftp_used"] for a in acts), "every ride has streams and is scored (TSS, FTP)")
+    rides = [a for a in acts if a["sport_type"] in ("Ride", "VirtualRide", "GravelRide")]
+    check(all(a["streams_fetched"] and a["tss"] is not None and a["ftp_used"] for a in rides), "every ride has streams and is scored (TSS, FTP)")
+    runs = [a for a in acts if a["sport_type"] in ("Run", "TrailRun")]
+    walks = [a for a in acts if a["sport_type"] == "Walk"]
+    check(bool(runs) and all(a["tss_source"] == "rhr" and a["ftp_used"] is None and a["np"] is None for a in runs),
+          f"runs sync too, scored on HR with no power numbers ({len(runs)} runs) (0.11.0)")
+    check(bool(walks) and all(a["tss_source"] == "estimate" and not a["streams_fetched"] for a in walks),
+          f"walks sync for load at a flat 20 TSS/h, without a stream call ({len(walks)} walks)")
     check(not job_errors("/"), "no job error banner after sync", str(job_errors("/")))
     for p in [p for p in PAGES if p != "/coach"] + [f"/activity/{acts[-1]['id']}"]:  # /coach: in daily_checkin
         check(web.get(p).status_code == 200, f"GET {p} -> 200 with synced data")
@@ -221,7 +228,8 @@ def stream_404() -> None:
     time.sleep(2)
     check(not job_errors("/"), "sync finished without a job error", str(job_errors("/")))
     check(web.get("/").status_code == 200, "home renders with an un-streamed ride in the list")
-    unscored = dbq("SELECT id FROM activities WHERE id != ? AND (tss IS NULL OR ftp_used IS NULL)", ride["id"])
+    unscored = dbq("SELECT id FROM activities WHERE id != ? AND (tss IS NULL OR (ftp_used IS NULL AND sport_type IN "
+                   "('Ride', 'VirtualRide', 'GravelRide')))", ride["id"])  # runs and walks have no FTP
     check(not unscored, "all other rides stay scored", str(unscored))
     check(ride["id"] in {r["id"] for r in dbq("SELECT id FROM activities")}, "the ride whose stream 404s is imported anyway")
 
@@ -325,7 +333,65 @@ def chat_and_analysis() -> None:
     check("health" in ctx and "hrv" in ctx and "mean_7d" in ctx, "Apple Health trends reached the analysis snapshot")
     check("Dev fact" in ctx or "athlete_history" in ctx, "athlete memory/history reached the analysis snapshot")
     usage = page("/settings")
-    check("claude-opus-5-5" in usage or "Opus" in usage or "opus" in usage, "usage table lists the Claude calls")
+    check("claude-sonnet-5-5" in usage or "Sonnet" in usage, "usage table lists the Claude calls")
+
+
+def running() -> None:
+    section("Running coaches: two sports, one week (0.11.0)")
+    r = post("/profile", _section="sports", cycling_active="on", running_active="on", cycling_coach="nextlevel",
+             running_coach="runnextlevel", primary_sport="cycling", threshold_pace="", run_lthr="")
+    check("Profile saved" in r.text, "running switched on next to cycling on Profile", notice(r))
+    r = post("/profile", _section="sports")
+    check("at least one sport stays active" in r.text, "both sports can't be put on hold", notice(r))
+    check('id="sports"' in page("/profile") and "Almgren (double threshold)" in page("/profile"),
+          "Profile's Sports card lists the running coaches")
+    plans = lambda: dbq("SELECT id, warnings, payload, coach FROM plans ORDER BY id")  # noqa: E731
+    calls = len(dbq("SELECT id FROM llm_calls WHERE purpose='plan'"))
+    n = len(plans())
+    post("/plan")
+    wait(lambda: len(plans()) > n, "the two-sport plan", 120)
+    latest = plans()[-1] if len(plans()) > n else None
+    check(len(dbq("SELECT id FROM llm_calls WHERE purpose='plan'")) - calls == 2, "two plan calls: the primary coach, then the other")
+    if latest:
+        days = json.loads(latest["payload"])["days"]
+        check({d.get("sport") for d in days} == {"cycling", "running"} or not [d for d in days if d["kind"] != "rest"],
+              "the stored week holds both sports' sessions", str({d.get("sport") for d in days}))
+        check(json.loads(latest["warnings"] or "[]") == [], "the two-sport week passes the combined rules", latest["warnings"])
+        reqs = [r for r in httpx.get(f"{ANTHROPIC}/_dev/requests").json() if (r["output_config"] or {}).get("format")]
+        second = json.dumps(reqs[-1]["messages"]) if reqs else ""
+        check("other_sport_days" in second and "tss_budget_left" in second, "the running coach planned around the rides")
+    p = page("/plan")
+    check("Plan with Next Level and Next Level Run" in p or "Re-plan remaining days" in p, "the Plan page names both coaches")
+    if latest and any(d["kind"] == "run" for d in json.loads(latest["payload"])["days"]):
+        check('sport-tag s-running' in p and "Easy run" in p, "run sessions show on the merged Plan page, tagged")
+        indoor = sum(d["kind"] == "zwift" for d in json.loads(latest["payload"])["days"])
+        check(p.count("#conn-zwift") == indoor, "run days are text only: only indoor rides offer Send/Connect",
+              f"{p.count('#conn-zwift')} buttons, {indoor} indoor rides")
+    c = page("/coach")
+    check('class="coach-pick"' in c and "Next Level Run" in c, "the chat lets the athlete pick which coach they address")
+    n = len(dbq("SELECT id FROM chat_messages WHERE role='assistant'"))
+    post("/coach", message="Make my next open day a rest day", coach="runnextlevel")
+    wait(lambda: len(dbq("SELECT id FROM chat_messages WHERE role='assistant'")) > n, "the running coach's reply", 90)
+    m = dbq("SELECT * FROM chat_messages WHERE role='assistant' ORDER BY id DESC LIMIT 1")
+    chat_req = [r for r in httpx.get(f"{ANTHROPIC}/_dev/requests").json()
+                if "plan_changes" in json.dumps((r["output_config"] or {}).get("format", {}))]
+    check(bool(m) and m[0]["coach"] == "runnextlevel" and bool(chat_req) and '\\"your_sport\\": \\"running\\"' in json.dumps(chat_req[-1]["messages"]),
+          "the running coach answered the message sent to them, with running context", str(m[:1])[:200])
+    if m and m[0]["proposal"]:
+        check(json.loads(m[0]["proposal"])["sport"] == "running", "their proposal only touches running days")
+    section("Run feedback and silent walks (0.11.0)")
+    httpx.delete(f"{SUP}/_dev/push")
+    run = httpx.post(f"{STRAVA}/_dev/ride", params={"sport": "Run", "minutes_ago": 15}).json()
+    walk = httpx.post(f"{STRAVA}/_dev/ride", params={"sport": "Walk", "minutes_ago": 5}).json()
+    post("/sync")
+    got = wait(lambda: [p for p in pushes() if f"/activity/{run['id']}" in json.dumps(p)], "the run's push", 90)
+    check(bool(got), "a new run gets the coach's feedback and a push")
+    wait(lambda: dbq("SELECT notified FROM activities WHERE id=? AND notified=1", walk["id"]), "the walk to be handled", 60)
+    check(not [p for p in pushes() if f"/activity/{walk['id']}" in json.dumps(p)], "a walk is silent: no push")
+    reqs = [r for r in httpx.get(f"{ANTHROPIC}/_dev/requests").json() if r["model"] == "claude-haiku-5-5"]
+    check(any("run_load" in json.dumps(r["messages"]) for r in reqs), "the run feedback prompt carries the run durability numbers")
+    check(web.get(f"/activity/{run['id']}").status_code == 200 and "Pace" in page(f"/activity/{run['id']}"), "the run page shows pace")
+    post("/profile", _section="sports", cycling_active="on")  # running back on hold for the sections after this one
 
 
 def zwift() -> None:
@@ -476,7 +542,7 @@ def garmin_source() -> None:
     wait(lambda: "Syncing" not in page("/"), "any running sync to finish", 90)  # a switch waits for it
     r = post("/profile/source", activity_source="garmin")
     check("Rides now come from Garmin Connect" in r.text, "switching the ride source says what happened")
-    check(not dbq("SELECT 1 FROM activities WHERE id < 8000000"), "the Strava rides are removed on the switch")
+    check(not dbq("SELECT 1 FROM activities WHERE id < 1000000"), "the Strava rides are removed on the switch")  # Strava's fake ids are 5000-9999
     wait(lambda: "Syncing" not in page("/"), "the first Garmin sync to finish", 90)
     r = post("/profile/source", health_source="garmin")
     check("Health data now comes from Garmin" in r.text, "switching the health source to Garmin")
@@ -485,10 +551,12 @@ def garmin_source() -> None:
         if dbq("SELECT 1 FROM activities") and not dbq("SELECT 1 FROM activities WHERE streams_fetched=0"):
             break
         post("/sync")
-    acts = dbq("SELECT * FROM activities")
-    check(len(acts) == 21, f"Garmin rides imported, walks left out ({len(acts)})")
-    check({a["sport_type"] for a in acts} == {"VirtualRide", "Ride"} and all(a["trainer"] == (a["sport_type"] == "VirtualRide") for a in acts),
-          "Garmin activity types map onto ride types (Zwift is indoor)")
+    every = dbq("SELECT * FROM activities")
+    acts = [a for a in every if a["sport_type"] in ("VirtualRide", "Ride")]
+    check(len(acts) == 21 and len(every) == 33, f"Garmin rides, walks and treadmill runs imported, yoga left out ({len(every)})")
+    check({a["sport_type"] for a in every} == {"VirtualRide", "Ride", "Walk", "Run"}
+          and all(a["trainer"] == (a["sport_type"] in ("VirtualRide", "Run")) for a in every),
+          "Garmin activity types map onto Strava's (Zwift and the treadmill are indoor)")
     check(all(a["streams_fetched"] and a["np"] and a["tss_source"] == "power" for a in acts),
           "every Garmin ride has power from its FIT file and is scored")
     errors = [e for e in job_errors("/") if e[0] in ("Sync", "Health")]  # the failure-mode section left an Analysis error
@@ -534,6 +602,7 @@ def main() -> None:
     ride_feedback()
     plan_and_modes()
     chat_and_analysis()
+    running()
     zwift()
     mywhoosh()
     multi_tenant()

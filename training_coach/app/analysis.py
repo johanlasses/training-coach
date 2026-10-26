@@ -46,7 +46,9 @@ Write in English, Markdown, with exactly these sections:
 ## Risks
 ## Focus for the next 4 weeks
 ## Suggested test
-Keep it under ~600 words. Use concrete numbers from the data. "Focus for the next 4 weeks" must \
+When snapshot.sports lists running, or recent_rides holds runs and walks (sport), cover running too: its volume \
+(snapshot.running: weeks, the last 4 weeks' average) against the durability cap, easy runs kept easy, and how the two \
+sports share the load (CTL/ATL/TSB are combined). Power numbers are cycling only. Keep it under ~600 words. Use concrete numbers from the data. "Focus for the next 4 weeks" must \
 move the athlete toward their stated goals.
 
 Analyse through this coaching philosophy and write in its voice:
@@ -55,7 +57,8 @@ Analyse through this coaching philosophy and write in its voice:
 
 
 async def run_analysis(db: DB, cfg: Config, snapshot: dict, kind: str, coach_key: str | None = None) -> int:
-    c = coaches.get(coach_key or cfg.default_coach)
+    sport = cfg.active_sports(datetime.now().date())[0]
+    c = coaches.get(coach_key or cfg.coach_key(sport), None if coach_key else sport)
     prev = db.analysis_before((datetime.now() - timedelta(days=6)).isoformat(timespec="seconds"))  # not a minutes-old run
     ctx = memory.for_coach(snapshot, c) | ({"previous_analysis": {
         "date": prev["created_at"][:10], "days_since": (datetime.now() - datetime.fromisoformat(prev["created_at"])).days,

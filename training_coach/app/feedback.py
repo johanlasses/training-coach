@@ -11,8 +11,8 @@ import math
 from datetime import date, datetime, timedelta, timezone
 from statistics import StatisticsError, correlation, median
 
-from . import coaches, ha, health, llm, memory, metrics, overview, stats, workouts
-from .coach import HEALTH_RULES
+from . import coach, coaches, ha, health, llm, memory, metrics, overview, sports, stats, workouts
+from .coach import HEALTH_RULES, counts_for
 from .config import HEALTH_SOURCES, Config
 from .db import DB
 
@@ -79,11 +79,41 @@ lasting facts (memory). Use it when it explains this ride, e.g. an old injury or
 {philosophy}"""
 
 
-def plan_day(db: DB, day: date, name: str = "") -> tuple[dict | None, dict | None]:
-    """(active plan of that week, the session this ride was). A session from another day of the week whose title is
-    in the ride's name wins (Zwift names the ride after the workout, and the athlete swaps days); else that day's."""
+RUN_SYSTEM = """You are {coach}, coaching one amateur runner (who may also ride: see the week). They just finished a run \
+and you give feedback on it. You get a JSON with the run (pace, HR, HR drift between its halves), the session you \
+planned for that day (if any) with its target pace, the week so far across both sports, their form, their goals and, \
+when present, readiness data (health, health_source).
+
+Write three things:
+- headline: the verdict in under 50 characters, e.g. "Easy run kept easy, HR steady". The title of a phone \
+notification. No emoji, no exclamation marks.
+- notification: 2-4 short sentences, under 300 characters, plain text, read on a lock screen. How the run went \
+against the plan (or its purpose if it wasn't planned), one specific number that backs it up, and what to do next.
+- detail: Markdown, 80-200 words, for the activity page. Pace against target_pace, HR against threshold_hr_bpm \
+(easy runs under ~85%), HR drift (under ~5% on a steady run is good durability; heat, hills and a fast finish raise \
+it), and what comes next. No headings, short paragraphs or a short list.
+
+Rules:
+- Use only the numbers in the JSON. Average pace on a hilly or trail run reads slow: judge effort from HR there.
+- An easy run done too fast is the thing to point out, kindly: it costs the next quality session.
+- run_load: this week's run minutes against the run durability cap. Near or over it, say to keep the next runs easy \
+and short: impact load builds slower than fitness, whatever the bike says.
+- form: tsb_before is form going into the run, tsb_tomorrow after it.
+- The planner reads health with this rule; apply the same rule for what comes next:
+{health_rules}
+- athlete_history is background; use it only when it explains this run.
+- English, in your own coaching voice:
+
+{philosophy}"""
+
+
+def plan_day(db: DB, day: date, name: str = "", a: dict | None = None) -> tuple[dict | None, dict | None]:
+    """(active plan of that week, the session this activity was). A session from another day of the week whose title
+    is in the activity's name wins (Zwift names the ride after the workout, and the athlete swaps days); else that
+    day's. With `a`, only sessions it can be (a ride for a ride, a run for a run)."""
     plan = db.active_plan(stats.week_start(day).isoformat())
-    sessions = [d for d in (plan or {}).get("payload", {}).get("days", []) if d["kind"] != "rest"]
+    sessions = [d for d in (plan or {}).get("payload", {}).get("days", []) if d["kind"] != "rest"
+                and (a is None or counts_for(d, a))]
     named = [d for d in sessions if overview._norm(d["title"]) and overview._norm(d["title"]) in overview._norm(name)]
     if named:
         return plan, min(named, key=lambda d: abs((date.fromisoformat(d["date"]) - day).days))
@@ -171,14 +201,69 @@ def new_bests(a: dict, acts: list[dict]) -> list[dict] | None:
             for s, label in BEST_DURATIONS.items() if mmp.get(s) and s in prior and mmp[s] >= prior[s] * 1.01]
 
 
+def hr_drift(a: dict, planned: dict | None) -> float | None:
+    """Second half's mean HR over the first half's, in %, without the first 10 min (warm-up): the cardiac drift of a
+    steady run. Only for runs of 40 min or more that weren't planned as hard (reps make any drift meaningless). HR, not
+    pace:HR decoupling: runs have no speed stream here."""
+    secs = a.get("moving_time") or 0
+    if secs < 40 * 60 or (planned and planned.get("intensity") in coach.RUN_HARD | {"tempo"}):
+        return None
+    hr = a.get("spark_hr") or []
+    hr = [h for h in hr[round(len(hr) * 600 / secs):] if h]
+    if len(hr) < 20:
+        return None
+    half = len(hr) // 2
+    first, second = sum(hr[:half]) / half, sum(hr[half:]) / (len(hr) - half)
+    return round((second - first) / first * 100, 1)
+
+
+def run_context(db: DB, cfg: Config, a: dict) -> tuple[dict, coaches.Coach]:
+    """The run branch: pace against the plan's target pace, HR against threshold HR, HR drift, and this week's run
+    minutes against the durability cap."""
+    day = date.fromisoformat(a["start_date_local"][:10])
+    acts = [x for x in db.activities(since_local=(day - timedelta(days=400)).isoformat())
+            if x["start_date_local"] <= a["start_date_local"]]
+    plan, planned = plan_day(db, day, a["name"] or "", a)
+    at = datetime.fromisoformat(a["start_date_local"][:19])
+    c = memory.coach_in_charge(db, cfg, at, "running")
+    d = stats.dashboard(acts, day, cfg)
+    running = stats.running(acts, day, cfg)
+    week_runs = sum((x["moving_time"] or 0) for x in sports.runs(acts) if x["start_date_local"][:10] >= stats.week_start(day).isoformat()) / 60
+    ctx = {
+        "run": {"date": day.isoformat(), "weekday": day.strftime("%A"), "name": a["name"], "type": a["sport_type"],
+                "treadmill": bool(a["trainer"]), "minutes": round((a["moving_time"] or 0) / 60),
+                "km": round((a["distance"] or 0) / 1000, 2), "pace": stats.pace(a), "elev_m": round(a["elevation_gain"] or 0),
+                "avg_hr": a["avg_hr"], "max_hr": a["max_hr"], "threshold_hr_bpm": cfg.run_threshold_hr,
+                "hr_drift_pct": hr_drift(a, planned), "tss": a["tss"], "tss_source": a["tss_source"]},
+        "planned_session": {k: planned.get(k) for k in ("date", "kind", "title", "description", "duration_min",
+                                                         "intensity", "target_pace", "surface")}
+        | {"planned_by": coaches.name_of(planned.get("coach"))} if planned else None,
+        "threshold_pace": running["threshold_pace"],
+        "run_load": {"minutes_this_week": round(week_runs), "cap_minutes": running["cap_minutes"],
+                     "longest_run_cap_min": running["longest_run_cap_min"]},
+        "week_so_far": [{"date": p["date"], "sport": sports.day_sport(p), "planned": p["title"] if p["kind"] != "rest" else "Rest",
+                         "status": st} for p, st in overview.day_statuses(plan, acts, day.isoformat())] if plan else [],
+        "form": {"ctl": d["ctl"], "atl": d["atl"], "tsb_before": d["tsb"], "tsb_tomorrow": round(d["ctl"] - d["atl"], 1)},
+        "athlete": {"goals": cfg.goals.strip() or "Not stated"},
+        "coach_notes": [{k: n[k] for k in ("kind", "start", "end", "text")} for n in db.active_notes(day.isoformat())],
+    }
+    h = memory.history(db, cfg, at)
+    ctx["athlete_history"] = {k: h[k] for k in ("coaches", "past_notes", "memory")}
+    if health.enabled(cfg):
+        ctx["health"], ctx["health_source"] = health.summary(db, day), HEALTH_SOURCES[cfg.health_source]
+    return ctx, c
+
+
 def context(db: DB, cfg: Config, a: dict) -> tuple[dict, coaches.Coach]:
+    if sports.kind(a["sport_type"]) == "run":
+        return run_context(db, cfg, a)
     day = date.fromisoformat(a["start_date_local"][:10])
     # Nothing after this ride: asking again later must not see the rest of the week
     acts = [x for x in db.activities(since_local=(day - timedelta(days=400)).isoformat())
             if x["start_date_local"] <= a["start_date_local"]]
-    plan, planned = plan_day(db, day, a["name"] or "")
+    plan, planned = plan_day(db, day, a["name"] or "", a)
     at = datetime.fromisoformat(a["start_date_local"][:19])
-    c = memory.coach_in_charge(db, cfg, at)
+    c = memory.coach_in_charge(db, cfg, at, "cycling")
     d = stats.dashboard(acts, day, cfg)
     zones = metrics.zone_seconds(a["power_hist"], a["ftp_used"]) if a.get("power_hist") and a.get("ftp_used") else []
     ride = {
@@ -237,7 +322,8 @@ def context(db: DB, cfg: Config, a: dict) -> tuple[dict, coaches.Coach]:
 async def generate(db: DB, cfg: Config, a: dict) -> dict:
     """Asks the coach about one ride and stores the feedback on it."""
     ctx, c = context(db, cfg, a)
-    msg = await llm.run(cfg.anthropic_api_key, SYSTEM.format(coach=c.name, philosophy=c.philosophy, health_rules=HEALTH_RULES),
+    system = RUN_SYSTEM if sports.kind(a["sport_type"]) == "run" else SYSTEM
+    msg = await llm.run(cfg.anthropic_api_key, system.format(coach=c.name, philosophy=c.philosophy, health_rules=HEALTH_RULES),
                         [{"role": "user", "content": f"```json\n{json.dumps(ctx, indent=1)}\n```"}],
                         schema=SCHEMA, effort="medium", max_tokens=8000, db=db, purpose="ride")
     fb = json.loads(llm.text_of(msg)) | {"coach": c.key, "model": msg.model,
@@ -248,6 +334,8 @@ async def generate(db: DB, cfg: Config, a: dict) -> dict:
 
 def stats_line(a: dict) -> str:
     parts = [f"{round((a['moving_time'] or 0) / 60)} min", f"{(a['distance'] or 0) / 1000:.1f} km"]
+    if not sports.is_ride(a) and stats.pace(a):
+        parts.append(stats.pace(a))
     if a.get("tss"):
         parts.append(f"TSS {round(a['tss'])}")
     if a.get("np"):
@@ -263,6 +351,9 @@ async def after_sync(db: DB, cfg: Config, now: datetime | None = None) -> int:
     now = now or datetime.now(timezone.utc)
     done = 0
     for a in db.activities_to_notify((now - WINDOW).strftime("%Y-%m-%dT%H:%M:%SZ")):
+        if sports.kind(a["sport_type"]) == "walk":  # walks count for load, silently: no push for every dog walk
+            db.update_activity(a["id"], notified=1)
+            continue
         started = datetime.fromisoformat(a["start_date"].replace("Z", "+00:00"))
         if not a["streams_fetched"] and now - started < STREAM_WAIT:
             continue  # power data comes on a later sync; feedback without it would be thin

@@ -48,7 +48,7 @@ async def test_run_sends_schema_fallbacks_and_effort(monkeypatch):
     assert llm.text_of(msg) == '{"ok": true}'
     req = requests[0]
     body = json.loads(req.content)
-    assert body["model"] == "claude-opus-5-5"
+    assert body["model"] == "claude-sonnet-5-5"
     assert body["fallbacks"] == "default"
     assert body["thinking"] == {"type": "adaptive"}
     assert body["output_config"] == {"effort": "high", "format": {"type": "json_schema", "schema": {"type": "object"}}}

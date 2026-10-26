@@ -1,5 +1,32 @@
 # Changelog
 
+## 0.11.0 (2026-10-26)
+
+- **Running coaches.** Profile → Sports has Cycling and Running, each with its own coach, an Active/On hold switch
+  and an optional end date, after which the sport goes back on hold by itself. Two new running coaches: **Almgren
+  (double threshold)**, easy running and controlled threshold work, double threshold only with high volume; and
+  **Next Level Run**, 80/20 running planned around work and family. Your cycling coach setting carries over.
+- **Two sports, one week.** With both active, your primary sport's coach plans first and the other plans around it.
+  A day can hold a ride and a run if they fit your minutes together. Hard days and the weekly load count across both
+  sports, so a VO2max run the day after bike intervals is two hard days in a row. The Plan page shows one week with
+  each session tagged Ride or Run. Runs are text only: pace, HR ceiling and structure, no Send button.
+- **Runs and walks sync.** From Strava and Garmin: runs, trail runs, treadmill and virtual runs, walks and hikes. Run
+  load comes from heart rate against your running threshold HR, or from pace against your threshold pace (set it on
+  Profile, or it's estimated from your runs). Walks count at an easy 20 TSS an hour. Power curve, zones and eFTP stay
+  cycling only. The first sync after the update fetches the past year of runs and walks.
+- **Run durability guard.** Run volume is capped from your running history, not your cycling fitness: about 10% over
+  the last 4 weeks, with a return-to-run floor; no single run much longer than your longest lately; and no hard runs
+  in the first 2 weeks back after a break.
+- **Talk to either coach.** With two sports, the Coach chat has a picker for who you're writing to. Each coach only
+  changes their own sport's days. The daily check-in comes from the coach of yesterday's or today's session.
+- **Run feedback.** A new run gets the coach's feedback and a notification: pace against the target, HR, drift and
+  where you are against the run cap. Walks count silently: no notification.
+- **A long walk counts on a recovery day.** A walk of 45 minutes or more completes a planned recovery session.
+- **Cheaper Claude.** Plan and analysis now run on Sonnet 5.5 at high effort instead of Opus 5.5, about half the cost.
+  Chat stays on Sonnet; ride feedback and the check-in on Haiku.
+- **The Coach page looks like Plan and Analysis.** The title and coach sit above the chat, with Notes and Clear beside
+  them.
+
 ## 0.10.4 (2026-10-26)
 
 - **No re-planning a week that's over.** A past week on the Plan page has no plan button any more; there's nothing

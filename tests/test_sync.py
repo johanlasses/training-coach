@@ -33,6 +33,8 @@ async def test_sync_imports_rides_and_streams(db):
     secs = list(range(3600))
     respx.get(f"{API}/activities/1/streams").mock(return_value=httpx.Response(200, json={
         "time": {"data": secs}, "watts": {"data": [250] * 3600}, "heartrate": {"data": [140] * 3600}}))
+    respx.get(f"{API}/activities/2/streams").mock(return_value=httpx.Response(200, json={  # a Stryd: running power
+        "time": {"data": secs}, "watts": {"data": [300] * 3600}, "heartrate": {"data": [150] * 3600}}))
     respx.get(f"{API}/activities/3/streams").mock(return_value=httpx.Response(200, json={
         "time": {"data": secs}, "heartrate": {"data": [150] * 3600}}))
 
@@ -41,7 +43,7 @@ async def test_sync_imports_rides_and_streams(db):
     client = StravaClient(db, "id", "secret")
     result = await sync(db, client, cfg)
 
-    assert result["listed"] == 2 and result["new"] == 2 and result["streams"] == 2
+    assert result["listed"] == 3 and result["new"] == 3 and result["streams"] == 3
     assert db.get("strava_token")["refresh_token"] == "r2"
 
     zwift = db.activity(1)
@@ -54,7 +56,9 @@ async def test_sync_imports_rides_and_streams(db):
     gravel = db.activity(3)
     assert gravel["tss_source"] == "hr"
     assert gravel["tss"] == pytest.approx((140 / 165) ** 2 * 100, abs=0.1)  # summary avg HR
-    assert db.activity(2) is None          # runs are skipped
+    run = db.activity(2)                   # runs are kept, scored on HR, and their power never counts
+    assert (run["tss_source"], run["np"], run["mmp"], run["ftp_used"]) == ("rhr", None, None, None)
+    assert run["spark_hr"] and not run["spark_watts"]
 
 
 @respx.mock

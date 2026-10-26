@@ -7,17 +7,28 @@
 {% block content %}
 {% set typing = (jobs.chat and jobs.chat.running) or (jobs.checkin and jobs.checkin.running) %}
 <div class="layout layout-aside chat-layout">
-  <section class="chat-panel">
-    <div class="chat-head">
-      {{ avatar(coach.key) }}
-      <div class="chat-title">
-        <h2>{{ coach.name }}</h2>
-        <div class="muted">{% if not has_plan %}No plan this week yet{% elif plan_coach != coach.key %}Took over this week · the plan is by {{ plan_coach | coach_name }}{% else %}Your coach{% endif %}</div>
+  <section class="chat-col">
+    {#- The page head, as on Plan and Analysis: title and subtitle, then the actions -#}
+    <div class="plan-head chat-top">
+      <div class="head-title">
+        <h2>Coach</h2>
+        {% set pc = plan_coaches.get(coach.sport) %}
+        <div class="muted one-line">{{ coach.name }} · {% if not has_plan %}no plan this week yet{% elif pc and pc != coach.key %}took over this week, the plan is by {{ pc | coach_name }}{% elif team | length > 1 %}your {{ 'running' if coach.sport == 'running' else 'cycling' }} coach{% else %}your coach{% endif %}</div>
       </div>
-      <details class="chat-notes"><summary class="btn secondary">Notes{% if notes %} ({{ notes | length }}){% endif %}</summary>
-        <div class="chat-notes-pop">{{ note_list(notes) }}</div></details>
-      {% if messages %}<form method="post" action="{{ base }}/coach/clear" onsubmit="return confirm('Delete the whole conversation? Coach notes and memory are kept.')"><button class="secondary">Clear</button></form>{% endif %}
+      {% if team | length > 1 %}
+      {#- One chat, two coaches: the athlete picks who they're talking to -#}
+      <div class="coach-pick" role="group" aria-label="Talk to">
+        {% for c in team %}<a class="btn{{ '' if c.key == coach.key else ' secondary' }}" href="{{ base }}/coach?to={{ c.key }}"
+           {{ 'aria-current="true"' | safe if c.key == coach.key }}>{{ c.short }}</a>{% endfor %}
+      </div>
+      {% endif %}
+      <div class="plan-action chat-actions">
+        <details class="chat-notes"><summary class="btn secondary">Notes{% if notes %} ({{ notes | length }}){% endif %}</summary>
+          <div class="chat-notes-pop">{{ note_list(notes) }}</div></details>
+        {% if messages %}<form method="post" action="{{ base }}/coach/clear" onsubmit="return confirm('Delete the whole conversation? Coach notes and memory are kept.')"><button class="secondary">Clear</button></form>{% endif %}
+      </div>
     </div>
+  <div class="chat-panel">
     {% if jobs.checkin and jobs.checkin.error %}<div class="notice error">Today's check-in failed: {{ jobs.checkin.error }}</div>{% endif %}
     {% if not ai_ok %}<div class="notice error">Add your Claude API key in <a href="{{ base }}/settings">Settings</a> to chat with the coach.</div>{% endif %}
 
@@ -26,17 +37,19 @@
       {% set prev = loop.previtem %}
       {% set new_day = not prev or prev.ts[:10] != m.ts[:10] %}
       {% if new_day %}<div class="chat-divider"><span>{{ 'Today' if m.ts[:10] == today else 'Yesterday' if m.ts[:10] == yesterday else m.ts[:10] | day_label }}</span></div>{% endif %}
-      {% if prev and prev.coach != m.coach %}<div class="chat-divider"><span>{{ m.coach | coach_name }} took over</span></div>{% endif %}
+      {#- a takeover is a new coach for the same sport; the other sport's coach answering is just the team -#}
+      {% if prev and prev.coach != m.coach and (prev.coach not in coaches or m.coach not in coaches or coaches[prev.coach].sport == coaches[m.coach].sport) %}<div class="chat-divider"><span>{{ m.coach | coach_name }} took over</span></div>{% endif %}
       {#- A new group (avatar, name, time) when the sender changes or after a pause -#}
       {% set head = new_day or prev.role != m.role or prev.coach != m.coach or prev.ts[:15] != m.ts[:15] or m.kind == 'checkin' %}
       <div class="msg-row {{ m.role }}{{ ' first' if head }}">
         {% if m.role == 'assistant' %}{% if head %}{{ avatar(m.coach) }}{% else %}<span class="avatar-gap"></span>{% endif %}{% endif %}
         <div class="msg-col">
-          {% if head %}<div class="msg-head">{% if m.role == 'assistant' %}<b>{{ m.coach | coach_name }}</b>{% endif %}{{ m.ts[11:16] }}{% if m.kind == 'checkin' %} · Daily check-in{% endif %}</div>{% endif %}
+          {% if head %}<div class="msg-head">{% if m.role == 'assistant' %}<b>{{ m.coach | coach_name }}</b>{% elif team | length > 1 %}To {{ m.coach | coach_short }} · {% endif %}{{ m.ts[11:16] }}{% if m.kind == 'checkin' %} · Daily check-in{% endif %}</div>{% endif %}
           <div class="msg">
             <div class="msg-text">{{ m.content }}</div>
             {% if m.ask and loop.last %}
             <form method="post" action="{{ base }}/coach" class="msg-ask"><input type="hidden" name="message" value="{{ m.ask }}">
+              <input type="hidden" name="coach" value="{{ m.coach }}">
               <button class="secondary" {{ 'disabled' if not ai_ok or typing }}>Adjust my week</button></form>
             {% endif %}
             {% for n in m.notes %}<p class="facts">✎ Saved note: {{ n }}</p>{% endfor %}
@@ -72,9 +85,11 @@
     </div>
 
     <form method="post" action="{{ base }}/coach" class="chat-composer">
+      <input type="hidden" name="coach" value="{{ coach.key }}">
       <textarea name="message" rows="1" required maxlength="4000" placeholder="Message {{ coach.short }}…" aria-label="Message"></textarea>
       <button {{ 'disabled' if not ai_ok or typing }}>Send</button>
     </form>
+  </div>
   </section>
   <aside class="chat-aside">
     <h2 class="section-title">Coach notes</h2>

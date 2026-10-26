@@ -5,15 +5,15 @@ from datetime import datetime
 
 import anthropic
 
-MODEL = "claude-opus-5-5"  # the key check and anything without its own entry below
-# Opus where the reasoning is the product and it runs about weekly: the plan (hard constraints, validated) and the
-# deep analysis. Sonnet for chat: interactive, plan edits are validated and retried. Haiku for the post-ride
-# feedback: a few sentences from numbers we compute, after every ride, so it's the high-volume call.
-MODELS = {"plan": MODEL, "analysis": MODEL, "chat": "claude-sonnet-5-5", "ride": "claude-haiku-5-5",
-          "checkin": "claude-haiku-5-5"}
+MODEL = "claude-sonnet-5-5"  # the key check and anything without its own entry below
+# Sonnet at high effort for the reasoning calls: the plan (hard constraints, validated and retried once) and the
+# deep analysis, and for chat (plan edits are validated too). Opus until 0.11.0; Sonnet is half the price and the
+# validator catches what it misses. Haiku for the post-ride feedback and the daily check-in: a few sentences from
+# numbers we compute, the high-volume calls.
+MODELS = {"plan": MODEL, "analysis": MODEL, "chat": MODEL, "ride": "claude-haiku-5-5", "checkin": "claude-haiku-5-5"}
 # Haiku has no server-side refusal fallback
 FALLBACK_MODELS = {"claude-opus-5-5", "claude-sonnet-5-5"}
-# $ per million tokens: input, output, cache read. For the usage estimate on Settings.
+# $ per million tokens: input, output, cache read. For the usage estimate on Settings (Opus: calls logged before 0.11.0).
 PRICES = {"claude-opus-5-5": (4.0, 20.0, 0.20), "claude-sonnet-5-5": (2.0, 10.0, 0.20),
           "claude-haiku-5-5": (0.10, 0.50, 0.01)}
 
@@ -27,7 +27,7 @@ async def run(api_key: str, system: str, messages: list[dict], *, schema: dict |
     """Streams one request on the purpose's model and returns the final message. With a db, the call's token
     usage is logged.
 
-    Server-side refusal fallback is on where the model has it: if Opus or Sonnet declines, the API reroutes to
+    Server-side refusal fallback is on where the model has it: if Sonnet declines, the API reroutes to
     its recommended fallback model inside the same call.
     """
     if not api_key:
@@ -86,8 +86,8 @@ async def check_key(api_key: str) -> str | None:
 
 
 def cost(model: str, input_tokens: int, output_tokens: int, cache_read: int = 0) -> float:
-    """Estimated $ for logged usage; unknown models priced as Opus."""
-    i, o, c = PRICES.get(model, PRICES[MODEL])
+    """Estimated $ for logged usage; unknown models priced as Opus (the dearest we use)."""
+    i, o, c = PRICES.get(model, PRICES["claude-opus-5-5"])
     return (input_tokens * i + output_tokens * o + cache_read * c) / 1e6
 
 

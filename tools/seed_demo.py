@@ -56,6 +56,21 @@ for back in range(120, -1, -1):
     db.update_activity(aid, streams_fetched=1, **process_streams(
         {"time": list(range(n)), "watts": watts, "heartrate": hr}))
 
+# Runs (0.11.0): a few easy runs and a walk in the last three weeks, HR only, like a watch without a foot pod
+for back, minutes, name, sport in ((18, 30, "Easy run", "Run"), (13, 35, "Easy run with strides", "Run"),
+                                   (9, 40, "Trail run", "TrailRun"), (4, 35, "Easy run", "Run"), (2, 70, "Evening walk", "Walk")):
+    d = today - timedelta(days=back)
+    start = datetime.combine(d, datetime.min.time()).replace(hour=7)
+    n, aid = minutes * 60, aid + 1
+    speed = 1.5 if sport == "Walk" else 2.9
+    hr = [100 if sport == "Walk" else 142 + i / n * 8 for i in range(n)]
+    db.upsert_activity_summary({
+        "id": aid, "name": name, "sport_type": sport, "start_date": start.isoformat() + "Z", "start_date_local": start.isoformat(),
+        "distance": n * speed, "moving_time": n, "elapsed_time": n + 60, "elevation_gain": 60, "trainer": 0, "avg_watts": None,
+        "weighted_avg_watts": None, "max_watts": None, "device_watts": 0, "avg_hr": sum(hr) / n, "max_hr": max(hr),
+        "kilojoules": None, "avg_speed": speed})
+    db.update_activity(aid, streams_fetched=1, **process_streams({"time": list(range(n)), "heartrate": hr}, ride=False))
+
 cfg = Config()
 recompute(db, cfg)
 
@@ -95,9 +110,26 @@ db.log(switched, "coach", "Coach: Carmichael (Time-Crunched) → Next Level", {"
 db.log(f"{ws - timedelta(weeks=5)}T21:00:00", "profile", "Goals: none → “Ride a 160 km gravel event in June”",
        {"field": "goals", "old": "", "new": "Ride a 160 km gravel event in June"})
 db.log(f"{ws - timedelta(weeks=2)}T07:10:00", "profile", "Weight: 78 kg → 76.5 kg", {"field": "weight_kg", "old": 78.0, "new": 76.5})
+# This week has both sports: runs on a rest day and next to the long ride (a double)
+for d in days:
+    d |= {"sport": "cycling", "coach": "nextlevel"}
+run = {"kind": "run", "intensity": "endurance", "target_tss": 35, "target_pace": "6:00–6:20/km", "surface": "road",
+       "steps": [], "bike": "none", "terrain": "", "test_protocol": "none", "sport": "running", "coach": "runnextlevel"}
+week = list(days)
+for i, title, minutes in ((3, "Easy run + strides", 35), (5, "Short shake-out run", 25)):
+    d = (ws + timedelta(days=i)).isoformat()
+    if i == today.weekday():
+        continue
+    entry = run | {"date": d, "title": title, "duration_min": minutes,
+                   "description": "Conversational, HR under 150. 4 × 20 s strides at the end. Short on time: 20 min easy."}
+    week = [x for x in week if not (x["date"] == d and x["kind"] == "rest")] + [entry]
+week.sort(key=lambda x: (x["date"], x["sport"] != "cycling"))
 plan_id = db.save_plan(ws.isoformat(), datetime.now().isoformat(timespec="seconds"), "demo",
-                       {"week_focus": "Build aerobic base", "rationale": "Demo plan.", "days": days, "block_week": 2}, [],
-                       "nextlevel")
+                       {"week_focus": "Build aerobic base", "rationale": "Demo plan.", "days": week, "block_week": 2,
+                        "sports": {"cycling": {"coach": "nextlevel", "week_focus": "Build aerobic base", "rationale": "Demo plan."},
+                                   "running": {"coach": "runnextlevel", "week_focus": "Easy running",
+                                               "rationale": "Two easy runs while the legs get used to impact again."}}},
+                       [], "nextlevel")
 
 # Today's ride: the planned workout, with the last rep fading, and the coach's feedback on it
 ftp = db.activities(limit=1)[0]["ftp_used"]
@@ -173,7 +205,7 @@ for i in range(35):  # a full 7-day week and 28-day baseline, so the Overview's 
 
 db.set("settings", {"health_rhr_entity": "sensor.demo_iphone_resting_heart_rate",
                     "health_hrv_entity": "sensor.demo_iphone_heart_rate_variability",
-                    "health_sleep_entity": "sensor.demo_iphone_sleep_duration"})
+                    "health_sleep_entity": "sensor.demo_iphone_sleep_duration", "running_active": True})
 db.add_chat(datetime.now().isoformat(timespec="seconds"), "assistant", "nextlevel", "Yesterday's endurance ride is in the bank, 62 TSS right on "
             "plan, and three sessions in a row this week. Today is the sweet spot: start at the low end of the range, your sleep "
             "was short again.", kind="checkin", ask="I missed Threshold 2×15. Can you adjust the rest of my week so it "

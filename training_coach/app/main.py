@@ -18,7 +18,7 @@ from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Resp
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
-from . import analysis, chat, checkin, coaches, feedback, ftptest, ha, health, memory, overview, stats, workouts
+from . import analysis, chat, checkin, coaches, feedback, ftptest, ha, health, memory, overview, sports, stats, workouts
 from . import coach as coach_mod
 from . import llm
 from .config import (ACTIVITY_SOURCES, DATA_DIR, FIELD_TYPES, HEALTH_SOURCES, LEVELS, SECRETS, SYNC_INTERVALS, WEEKDAYS,
@@ -251,7 +251,7 @@ class State:
     async def do_chat(self) -> None:
         await chat.respond(self.db, self.cfg, self.snapshot(), date.today())
 
-    async def do_plan(self, week_start: date, coach_key: str, activate: bool = False) -> None:
+    async def do_plan(self, week_start: date, coach_key: str | None = None, activate: bool = False) -> None:
         """`activate`: the new plan runs the week (the Plan page's button: it shows one plan, the athlete's coach's,
         so the plan they just made must be the one Overview, notifications and the sensor follow)."""
         plan_id = await coach_mod.generate_plan(self.db, self.cfg, self.snapshot(), week_start, date.today(), coach_key)
@@ -278,12 +278,12 @@ class State:
 
     async def do_auto_plan(self, week_start: date) -> None:
         try:
-            await self.do_plan(week_start, self.cfg.default_coach)
+            await self.do_plan(week_start)
         except Exception as e:
             await ha.notify(self.cfg.notify_service, "Next week's plan failed", str(e)[:180])
             raise
         await ha.notify(self.cfg.notify_service, "Next week's plan is ready",
-                        f"{coaches.name_of(self.cfg.default_coach)} planned the week of {week_start.strftime('%-d %b')}.",
+                        f"{plan_coach_names(self.cfg, week_start)} planned the week of {week_start.strftime('%-d %b')}.",
                         ha.tap(f"/plan/week/{week_start.isoformat()}", "plan"))
 
     async def do_auto_analysis(self) -> None:
@@ -371,13 +371,23 @@ def next_run(now: datetime, at: str, weekday: str | None = None) -> datetime | N
     return None
 
 
-def planned_by_date(db: DB, acts: list[dict]) -> dict[str, dict]:
-    """Date → the active plan's session that day, for the weeks these rides fall in."""
-    out: dict[str, dict] = {}
-    for ws in {stats.week_start(date.fromisoformat(a["start_date_local"][:10])).isoformat() for a in acts}:
-        for d in (db.active_plan(ws) or {}).get("payload", {}).get("days", []):
-            if d["kind"] != "rest":
-                out[d["date"]] = d
+def plan_coach_names(cfg: Config, week_start: date) -> str:
+    """"Next Level" or "Next Level and Next Level Run": the coaches who plan that week, primary first."""
+    days = [week_start + timedelta(days=i) for i in range(7)]
+    active = list(dict.fromkeys(s for d in days for s in cfg.active_sports(d)))
+    return " and ".join(coaches.get(cfg.coach_key(s), s).name for s in active)
+
+
+def planned_by_activity(db: DB, acts: list[dict]) -> dict[int, dict]:
+    """Activity id → the active plan's session that day it can be (a ride's ride, a run's run), for the feed."""
+    out: dict[int, dict] = {}
+    plans = {ws: db.active_plan(ws) for ws in {stats.week_start(date.fromisoformat(a["start_date_local"][:10])).isoformat()
+                                                for a in acts}}
+    for a in acts:
+        days = (plans[stats.week_start(date.fromisoformat(a["start_date_local"][:10])).isoformat()] or {}).get("payload", {})
+        if d := next((d for d in days.get("days", []) if d["date"] == a["start_date_local"][:10] and d["kind"] != "rest"
+                      and coach_mod.counts_for(d, a)), None):
+            out[a["id"]] = d
     return out
 
 
@@ -548,6 +558,8 @@ templates.env.globals["ride_profiles"] = workouts.ride_profiles
 templates.env.filters["coach_name"] = coaches.name_of
 templates.env.filters["coach_short"] = coaches.short_name_of
 templates.env.filters["first_sentence"] = overview.first_sentence
+templates.env.filters["pace"] = stats.pace
+templates.env.filters["is_ride"] = sports.is_ride
 
 
 def base(request: Request) -> str:
@@ -589,7 +601,7 @@ async def home(request: Request):
     status = overview.status(st.db, st.cfg, acts, today, d)
     ready = health.readiness(health.summary(st.db, today)) if health.enabled(st.cfg) else None
     return render(request, "home.html", d=d, status=status, gauges=overview.gauges(status, ready, d["fitness"]),
-                  latest=feed[0] if feed else None, feed=feed[1:], planned=planned_by_date(st.db, feed),
+                  latest=feed[0] if feed else None, feed=feed[1:], planned=planned_by_activity(st.db, feed),
                   feedback_running=(st.jobs.get("feedback") or {}).get("running"))
 
 
@@ -605,7 +617,7 @@ async def activity(request: Request, activity_id: int):
     zones = list(zip([z for z, _ in ZONES], zone_seconds(a["power_hist"], a["ftp_used"]))) if a.get("power_hist") else []
     fb = a.get("feedback")
     return render(request, "activity.html", a=a, curve90=stats.power_curve(acts, day, 90), zones=zones,
-                  planned=feedback.plan_day(st.db, day)[1],
+                  planned=feedback.plan_day(st.db, day, a["name"] or "", a)[1],
                   fb_html=render_md(fb["detail"]) if fb else None, fb_coach=coaches.name_of(fb["coach"]) if fb else None)
 
 
@@ -627,27 +639,34 @@ async def plan_week_view(request: Request, week: str):
 
 @app.get("/plan")
 async def plan_view(request: Request, week: str | None = None):
-    """The week planned by the athlete's coach (Profile); a week that coach didn't plan shows its active plan, from
-    whoever made it, so a past week is never empty."""
+    """The week planned by the athlete's coach (Profile; with two sports, the primary sport's coach leads and the
+    week shows both); a week that coach didn't plan shows its active plan, from whoever made it, so a past week is
+    never empty."""
     st = athlete(request)
     today = date.today()
     ws = date.fromisoformat(week) if week else stats.week_start(today)
     plans = {k or "": p for k, p in st.db.week_plans(ws.isoformat()).items()}
     active = st.db.active_plan(ws.isoformat())
-    coach = coaches.get(st.cfg.default_coach).key
+    lead = st.cfg.active_sports(max(today, ws))[0]
+    coach = coaches.get(st.cfg.coach_key(lead), lead).key
     plan = plans.get(coach) or active
     acts = st.db.activities(since_local=ws.isoformat())
     by_day: dict[str, list] = {}
     for a in acts:
         by_day.setdefault(a["start_date_local"][:10], []).append(a)
-    status, tests = {}, {}
+    status, tests, matched = {}, {}, {}
     if plan:
         for d in plan["payload"]["days"]:
-            status[d["date"]] = "upcoming" if d["date"] > today.isoformat() else coach_mod.compliance(d, by_day.get(d["date"], []))
-            results = [r for a in by_day.get(d["date"], []) if (r := ftptest.estimate(d.get("test_protocol", "none"), a.get("mmp")))]
+            k = sports.day_key(d)
+            day_acts = by_day.get(d["date"], [])
+            matched[k] = [a for a in day_acts if d["kind"] == "rest" or coach_mod.counts_for(d, a)]
+            status[k] = "upcoming" if d["date"] > today.isoformat() else coach_mod.compliance(d, day_acts)
+            results = [r for a in day_acts if (r := ftptest.estimate(d.get("test_protocol", "none"), a.get("mmp")))]
             if results:
                 tests[d["date"]] = max(results)
-    return render(request, "plan.html", plan=plan, coach=coach, active_coach=active["coach"] if active else None,
+    return render(request, "plan.html", plan=plan, coach=coach, coach_names=plan_coach_names(st.cfg, ws),
+                  matched=matched, two_sports=len({sports.day_sport(d) for d in (plan or {}).get("payload", {}).get("days", [])}) > 1,
+                  active_coach=active["coach"] if active else None,
                   active_id=active["id"] if active else None, week=ws, prev=ws - timedelta(days=7),
                   next=ws + timedelta(days=7), today=today.isoformat(), status=status, by_day=by_day, tests=tests,
                   applied_tests={t["date"] for t in st.cfg.ftp_tests}, needs_profile=needs_profile(st),
@@ -660,7 +679,7 @@ def zwift_day(st: State, plan_id: int, day: str) -> tuple[dict, dict, str]:
     d = next((d for d in (plan or {}).get("payload", {}).get("days", []) if d["date"] == day and d["kind"] == "zwift"), None)
     if not d:
         raise HTTPException(404)
-    c = coaches.get(plan["coach"])
+    c = coaches.get(d.get("coach") or plan["coach"])
     name = f"{date.fromisoformat(day).strftime('%a %-d %b')} · {d['title']}"
     return plan, d, workouts.to_zwo(name, d["description"], d["steps"], c.cheers, c.last_rep)
 
@@ -687,7 +706,7 @@ async def zwift_upload(request: Request, plan_id: int, day: str):
 async def mywhoosh_upload(request: Request, plan_id: int, day: str):
     st = athlete(request)
     plan, d, _ = zwift_day(st, plan_id, day)  # the same indoor sessions, the same coach's cheers
-    c = coaches.get(plan["coach"])
+    c = coaches.get(d.get("coach") or plan["coach"])
     name = f"{date.fromisoformat(day).strftime('%a %-d %b')} · {d['title']}"
     async with st.send_lock:  # a double tap mustn't make two calendar entries, one of them never tracked
         try:
@@ -716,7 +735,7 @@ async def analysis_view(request: Request, id: int | None = None):
     a = st.db.analysis(id)
     html = render_md(a["markdown"]) if a else None
     return render(request, "analysis.html", a=a, html=html, history=st.db.analyses(),
-                  default_coach=st.cfg.default_coach)
+                  analysis_coach=analysis_coach(st.cfg))
 
 
 @app.post("/sync")
@@ -745,7 +764,7 @@ async def plan_now(request: Request, week: str | None = None):
     if ws + timedelta(days=6) < date.today():  # nothing left to plan; a stale page mustn't rewrite history
         st.flash = ("error", "That week is over: there's nothing left to plan.")
         return back(request, f"/plan?week={ws.isoformat()}")
-    st.start_job("plan", st.do_plan(ws, coaches.get(st.cfg.default_coach).key, activate=True))  # the athlete's coach plans
+    st.start_job("plan", st.do_plan(ws, activate=True))  # the athlete's coaches plan, primary sport first
     return back(request, f"/plan?week={ws.isoformat()}")
 
 
@@ -770,11 +789,17 @@ async def coach_view(request: Request):
     active = st.db.active_plan(stats.week_start(today).isoformat())
     for m in messages:  # old → new title per changed day, for the proposal diff
         if m["proposal"]:
-            old = {d["date"]: d for d in (st.db.plan(m["proposal"]["plan_id"]) or {}).get("payload", {}).get("days", [])}
+            old_plan = st.db.plan(m["proposal"]["plan_id"])
+            sport = m["proposal"].get("sport", "cycling")
+            old = {d["date"]: d for d in chat.own_days(old_plan, [x["date"] for x in m["proposal"]["days"]], sport)} if old_plan else {}
             m["diff"] = [(d, old.get(d["date"])) for d in m["proposal"]["days"]]
             m["live"] = (not m["applied_plan_id"] and active and active["id"] == m["proposal"]["plan_id"]
                          and all(d["date"] >= today.isoformat() for d in m["proposal"]["days"]))
-    return render(request, "coach.html", messages=messages, coach=chat.chat_coach(st.db, st.cfg, today),
+    team = chat.chat_coaches(st.db, st.cfg, today)
+    picked = chat.addressed(st.db, st.cfg, today, request.query_params.get("to") or next(
+        (m["coach"] for m in reversed(messages) if m["role"] == "user"), None))
+    return render(request, "coach.html", messages=messages, coach=picked, team=team,
+                  plan_coaches={c.sport: memory.plan_coach(active, c.sport) for c in team} if active else {},
                   notes=st.db.active_notes(today.isoformat()), has_plan=bool(active),
                   plan_coach=active["coach"] if active else None, today=today.isoformat(),
                   yesterday=(today - timedelta(days=1)).isoformat())
@@ -790,13 +815,15 @@ async def coach_status(request: Request):
 @app.post("/coach")
 async def coach_send(request: Request):
     st = athlete(request)
-    text = str((await request.form()).get("message", "")).strip()[:4000]
+    form = await request.form()
+    text = str(form.get("message", "")).strip()[:4000]
+    to = chat.addressed(st.db, st.cfg, date.today(), str(form.get("coach", ""))).key  # the coach they tapped
     if (st.jobs.get("chat") or {}).get("running"):
         st.flash = ("error", "The coach is still answering your last message. Send this one when the reply is in.")
     elif text:
-        st.db.add_chat(datetime.now().isoformat(timespec="seconds"), "user", chat.chat_coach(st.db, st.cfg, date.today()).key, text)
+        st.db.add_chat(datetime.now().isoformat(timespec="seconds"), "user", to, text)
         st.start_job("chat", st.do_chat())
-    return back(request, "/coach")
+    return back(request, f"/coach?to={to}" if form.get("coach") else "/coach")  # the resolved key, never the raw field
 
 
 @app.post("/coach/{msg_id}/apply")
@@ -870,20 +897,49 @@ async def ftp_test_delete(request: Request, date_: str = Query(alias="date")):
     return back(request, "/profile")
 
 
+def analysis_coach(cfg: Config) -> str:
+    """The analysis is written by the primary active sport's coach (Profile)."""
+    sport = cfg.active_sports(date.today())[0]
+    return coaches.get(cfg.coach_key(sport), sport).key
+
+
 @app.post("/analysis")
 async def analysis_now(request: Request):
     st = athlete(request)
-    st.start_job("analysis", st.do_analysis(coaches.get(st.cfg.default_coach).key))  # the athlete's coach (Profile)
+    st.start_job("analysis", st.do_analysis(analysis_coach(st.cfg)))  # the athlete's coach (Profile)
     return back(request, "/analysis")
 
 
 DAY_NAMES = dict(zip(WEEKDAYS, ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]))
-CHOICES = {"athlete_level": LEVELS, "default_coach": coaches.COACHES, "activity_source": ACTIVITY_SOURCES,
+CHOICES = {"athlete_level": LEVELS, "cycling_coach": {c.key for c in coaches.for_sport("cycling")},
+           "running_coach": {c.key for c in coaches.for_sport("running")}, "primary_sport": sports.SPORTS,
+           "activity_source": ACTIVITY_SOURCES,
            "health_source": HEALTH_SOURCES, "workout_app": WORKOUT_APPS, "sync_interval_min": {str(k) for k in SYNC_INTERVALS},
            "auto_plan_day": DAY_NAMES, "auto_analysis_day": DAY_NAMES}
 TIMES = {"notify_time", "auto_plan_time", "auto_analysis_time"}
+DATES = {"cycling_until", "running_until"}
+SECTION_BOOLS = {"schedules": {"zwift_refresh", "auto_plan", "auto_analysis"},  # unticked checkboxes are absent
+                 "sports": {"cycling_active", "running_active", "run_in_dark"}}
 SOURCE_FIELDS = {"activity_source", "health_source", "garmin_api_key"}  # their own routes, never apply_form
 CONNECTION_NAMES = {"strava": "Strava", "garmin": "Garmin", "apple": "Apple Health", "zwift": "Zwift", "mywhoosh": "MyWhoosh"}
+
+
+def valid_date(raw: str) -> bool:
+    try:
+        date.fromisoformat(raw)
+        return True
+    except ValueError:
+        return False
+
+
+def parse_pace(raw: str) -> int | None:
+    """"4:45" (min:s per km; "4.45" and "4,45" too, the iPhone's keypads) → 285 s; empty → 0 (estimated); None if it
+    isn't a sensible pace."""
+    if not raw:
+        return 0
+    m = re.fullmatch(r"(\d{1,2})[:.,]([0-5]\d)(?:\s*/\s*km)?", raw)
+    secs = int(m[1]) * 60 + int(m[2]) if m else None
+    return secs if secs and 150 <= secs <= 720 else None  # 2:30–12:00 /km
 
 
 def valid_time(raw: str) -> bool:
@@ -910,6 +966,7 @@ def apply_form(st: State, form, phones: list[str] | None = None) -> list[str]:
     cfg = st.cfg
     errors = []
     before = memory.tracked(cfg)
+    before_active = (cfg.cycling_active, cfg.running_active)
     skip: set[str] = set()
     if st.shared & set(STRAVA_APP) and any(str(form.get(k, "")).strip() for k in STRAVA_APP):
         # Leaving the shared Strava app takes both fields: half of it would pair with the owner's other half (and save it)
@@ -924,7 +981,7 @@ def apply_form(st: State, form, phones: list[str] | None = None) -> list[str]:
                 cfg.available_days = [d for d in WEEKDAYS if d in form.getlist("available_days")]
             continue
         if typ == "bool":
-            if form.get("_section") == "schedules":  # unticked checkboxes are absent from the form
+            if name in SECTION_BOOLS.get(str(form.get("_section", "")), ()):  # unticked checkboxes are absent
                 setattr(cfg, name, name in form)
             continue
         if name not in form or name in skip or (name == "anthropic_api_key" and not st.is_owner) or name in SOURCE_FIELDS:
@@ -936,6 +993,19 @@ def apply_form(st: State, form, phones: list[str] | None = None) -> list[str]:
         if name in TIMES and raw and not valid_time(raw):
             errors.append(f"{name.replace('_', ' ')}: '{raw}' is not a time like 07:00")
             continue
+        if name in DATES and raw and not valid_date(raw):
+            errors.append(f"{name.replace('_', ' ')}: '{raw}' is not a date")
+            continue
+        if name == "threshold_pace":
+            secs = parse_pace(raw)
+            if secs is None:
+                errors.append(f"threshold pace: '{raw}' is not a pace like 4:45")
+            else:
+                cfg.threshold_pace = secs
+            continue
+        if name == "run_lthr" and raw and not (raw.isdigit() and 100 <= int(raw) <= 220):
+            errors.append(f"running threshold HR: '{raw}' isn't a heart rate between 100 and 220")
+            continue
         if name in SECRETS and not raw:
             continue  # blank secret field = keep the stored value
         if name in CHOICES and raw not in CHOICES[name]:
@@ -946,6 +1016,9 @@ def apply_form(st: State, form, phones: list[str] | None = None) -> list[str]:
         except ValueError:
             errors.append(f"{name.replace('_', ' ')}: '{raw}' is not a number")
             continue
+    if form.get("_section") == "sports" and not (cfg.cycling_active or cfg.running_active):
+        cfg.cycling_active, cfg.running_active = before_active
+        errors.append("sports: at least one sport stays active (put the other on hold instead)")
     if form.get("clear_anthropic_api_key") and st.is_owner:
         cfg.anthropic_api_key = ""
     st.save()
@@ -1064,7 +1137,11 @@ async def profile_view(request: Request):
                   authorize_url=st.strava.authorize_url() if st.strava.has_app else None, redirect_uri=REDIRECT_URI,
                   garmin_key=bool(st.cfg.garmin_api_key), garmin_status=st.garmin.status(),
                   zwift_profile=st.db.get("zwift_profile"), workout_apps=WORKOUT_APPS, connected=st.connected(),
-                  mywhoosh_ok=st.mywhoosh.configured, mywhoosh_account=st.mywhoosh.account())
+                  mywhoosh_ok=st.mywhoosh.configured, mywhoosh_account=st.mywhoosh.account(),
+                  # Sports
+                  sport_names=sports.SPORTS, coaches_by_sport={s: coaches.for_sport(s) for s in sports.SPORTS},
+                  active_now=st.cfg.active_sports(today), running=stats.running(acts, today, st.cfg),
+                  pace_value=stats.fmt_pace(st.cfg.threshold_pace).removesuffix("/km") if st.cfg.threshold_pace else "")
 
 
 @app.post("/profile")

@@ -76,7 +76,7 @@ def fake_llm(monkeypatch, reply=FB):
 # --- models per purpose ---------------------------------------------------
 
 @pytest.mark.parametrize("purpose, model, fallback", [
-    ("plan", "claude-opus-5-5", True), ("analysis", "claude-opus-5-5", True),
+    ("plan", "claude-sonnet-5-5", True), ("analysis", "claude-sonnet-5-5", True),
     ("chat", "claude-sonnet-5-5", True), ("ride", "claude-haiku-5-5", False)])
 async def test_each_purpose_runs_on_its_model(monkeypatch, purpose, model, fallback):
     requests = mock_api(monkeypatch, sse("{}"))

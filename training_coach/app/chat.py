@@ -5,7 +5,7 @@ import copy
 import json
 from datetime import date, datetime, time, timedelta
 
-from . import coach, coaches, memory
+from . import coach, coaches, memory, sports
 from .config import Config
 from .db import DB
 from .stats import week_start
@@ -24,11 +24,18 @@ NOTE_SCHEMA = {
     "additionalProperties": False,
 }
 
+def chat_schema(sport: str = "cycling") -> dict:
+    """The reply, with plan changes in the addressed coach's sport."""
+    return CHAT_SCHEMA | {"properties": CHAT_SCHEMA["properties"] | {"plan_changes": {
+        "type": "array", "items": coach.DAY_SCHEMAS[sport],
+        "description": "Replacement days for open_dates that change, in your sport only; empty if the plan stays"}}}
+
+
 CHAT_SCHEMA = {
     "type": "object",
     "properties": {
         "reply": {"type": "string", "description": "Your answer to the athlete, plain text"},
-        "plan_changes": {"type": "array", "items": coach.PLAN_SCHEMA["properties"]["days"]["items"],
+        "plan_changes": {"type": "array", "items": coach.CYCLING_DAY,
                          "description": "Replacement days for open_dates that change; empty if the plan stays"},
         "add_notes": {"type": "array", "items": NOTE_SCHEMA},
         "remove_note_ids": {"type": "array", "items": {"type": "integer"}},
@@ -71,8 +78,8 @@ week isn't a fact. Something with a date range is a note; a yearly pattern is me
 Don't remember this week's plan or what is already in memory.
 - forget_memory_ids: facts that turned out wrong or no longer hold. When a fact changes, forget the old one and \
 remember the new one.
-- If active_plan.coach isn't you, the athlete switched to you this week and that plan is your predecessor's. \
-Acknowledge the handover the first time. Once you change anything, the rest of the week must pass your rules: if \
+- If active_plan.your_sport_planned_by isn't you, the athlete switched to you this week and that plan is your \
+predecessor's. Acknowledge the handover the first time. Once you change anything, the rest of the week must pass your rules: if \
 your predecessor's remaining days break them, ease those days too and say why.
 - Their main goal is snapshot.athlete.goals. A smaller event doesn't replace it: save it as an event note and \
 fit it into the progression. If the main goal itself changes, suggest they update Goals on the Profile page.
@@ -81,21 +88,53 @@ before it, not in the first days after illness or an absence. If this week has n
 (kind other) asking for a test early next week.
 - Pain or injury: don't diagnose. Suggest easy riding or rest, and a physio if it persists. Illness: follow the \
 illness rule above.
-- open_dates leaves out today when today's ride is already done."""
+- open_dates leaves out today when today's session in your sport is already done.
+- To drop one of your sessions, send a rest day for that date: the other sport's session that day (if any) stays."""
 
 
 def open_dates(plan: dict | None, today: date, rode_today: bool = False) -> list[str]:
-    """Plan dates the chat may still change: today on, without today once it has been ridden."""
+    """Plan dates the chat may still change: today on, without today once its session has been done."""
     first = (today + timedelta(days=1) if rode_today else today).isoformat()
-    return [d["date"] for d in (plan or {}).get("payload", {}).get("days", []) if d["date"] >= first]
+    return sorted({d["date"] for d in (plan or {}).get("payload", {}).get("days", []) if d["date"] >= first})
 
 
-def merge(plan: dict, changes: list[dict], dates: list[str]) -> list[dict]:
-    """The plan's open days with the changed days swapped in."""
-    by_date = {d["date"]: copy.deepcopy(d) for d in plan["payload"]["days"] if d["date"] in dates}
+def rest_day(day: str, sport: str, coach_key: str | None) -> dict:
+    return {"date": day, "kind": "rest", "title": "Rest", "description": "", "duration_min": 0, "intensity": "recovery",
+            "target_tss": 0, "bike": "none", "terrain": "", "steps": [], "test_protocol": "none", "sport": sport,
+            "coach": coach_key}
+
+
+def own_days(plan: dict, dates: list[str], sport: str) -> list[dict]:
+    """A sport's days on `dates`, one per date: its session, else its rest day (a merged two-sport plan keeps a rest
+    day only on a date without any session)."""
+    days = {d["date"]: copy.deepcopy(d) for d in plan["payload"]["days"]
+            if d["date"] in dates and (sports.day_sport(d) == sport or d["kind"] == "rest")}
+    for d in days.values():
+        if d["kind"] == "rest":
+            d["sport"] = sport
+    return [days.get(k) or rest_day(k, sport, memory.plan_coach(plan, sport)) for k in dates]
+
+
+def merge(plan: dict, changes: list[dict], dates: list[str], sport: str = "cycling") -> list[dict]:
+    """The sport's open days with the changed days swapped in."""
+    by_date = {d["date"]: d for d in own_days(plan, dates, sport)}
     for d in changes:
         by_date[d["date"]] = copy.deepcopy(d)
     return [by_date[k] for k in sorted(by_date)]
+
+
+def others(plan: dict, dates: list[str], sport: str) -> list[dict]:
+    """The other sport's sessions on `dates`: fixed for this coach."""
+    return [d for d in plan["payload"]["days"] if d["date"] in dates and d["kind"] != "rest" and sports.day_sport(d) != sport]
+
+
+def replace_days(days: list[dict], changes: list[dict]) -> list[dict]:
+    """A plan's days with a sport's changed days in: per changed date, that sport's session (or the date's rest day)
+    goes, the change comes in unless it's a rest day next to the other sport's session."""
+    changed = {sports.day_key(d) for d in changes}
+    dates = {d["date"] for d in changes}
+    kept = [d for d in days if sports.day_key(d) not in changed and not (d["kind"] == "rest" and d["date"] in dates)]
+    return coach.merge_days([kept, [copy.deepcopy(d) for d in changes]])
 
 
 def strip_cues(days: list[dict]) -> list[dict]:
@@ -107,10 +146,13 @@ def strip_cues(days: list[dict]) -> list[dict]:
     return out
 
 
-def checker(plan: dict | None, dates: list[str], cfg: Config, snapshot: dict, today: date, rules: dict):
-    """check(result) → errors for a chat response's plan changes, with the week's rules."""
+def checker(plan: dict | None, dates: list[str], cfg: Config, snapshot: dict, today: date, rules: dict,
+            c: coaches.Coach | None = None):
+    """check(result) → errors for a chat response's plan changes in coach `c`'s sport, with the week's rules."""
+    c = c or coaches.get(None)
+
     def check(result: dict) -> list[str]:
-        changes = result["plan_changes"]
+        changes = coach.tag(result["plan_changes"], c.sport, c.key)
         if not changes:
             return []
         if not plan:
@@ -123,37 +165,56 @@ def checker(plan: dict | None, dates: list[str], cfg: Config, snapshot: dict, to
         week_start = date.fromisoformat(plan["week_start"])
         # From the first open date: a ride already done today counts as done, not as a plan day
         _, done_tss, done_rides = coach.done_this_week(snapshot, week_start, date.fromisoformat(dates[0]))
-        merged = {"days": merge(plan, changes, dates)}
+        merged = {"days": merge(plan, changes, dates, c.sport)}
         errors = coach.validate(merged, dates, cfg, snapshot["load"]["ctl"], done_tss,
-                                plan["payload"].get("block_week") == 4, rules, done_rides, snapshot.get("coach_notes", []))
+                                plan["payload"].get("block_week") == 4, rules, done_rides, snapshot.get("coach_notes", []),
+                                others(plan, dates, c.sport), snapshot.get("running"))
         fixed = {d["date"]: d for d in merged["days"]}
         result["plan_changes"] = [fixed[d["date"]] for d in changes]  # with validate's TSS normalisation
         return errors
     return check
 
 
-def chat_coach(db: DB, cfg: Config, today: date) -> coaches.Coach:
-    return memory.coach_in_charge(db, cfg, datetime.combine(today, time.max))
+def chat_coach(db: DB, cfg: Config, today: date, sport: str | None = None) -> coaches.Coach:
+    return memory.coach_in_charge(db, cfg, datetime.combine(today, time.max), sport)
+
+
+def chat_coaches(db: DB, cfg: Config, today: date) -> list[coaches.Coach]:
+    """The coaches the athlete can address: one per active sport, primary first."""
+    return [chat_coach(db, cfg, today, s) for s in cfg.active_sports(today)]
+
+
+def addressed(db: DB, cfg: Config, today: date, key: str | None) -> coaches.Coach:
+    """The coach a message goes to: the one picked, if it coaches an active sport; else the primary sport's."""
+    return next((c for c in chat_coaches(db, cfg, today) if c.key == key), chat_coaches(db, cfg, today)[0])
 
 
 async def respond(db: DB, cfg: Config, snapshot: dict, today: date) -> int:
-    """Answers the latest user message in the chat. Saves notes and memory right away; plan changes as a proposal."""
+    """Answers the latest user message in the chat, by the coach it was sent to. Saves notes and memory right away;
+    plan changes (in that coach's sport only) as a proposal."""
     ws = week_start(today)
     plan = db.active_plan(ws.isoformat())
-    c = chat_coach(db, cfg, today)
-    rules = c.rules(cfg.athlete_level, coach.weeks_with_coach(db, c.key, ws))
-    dates = open_dates(plan, today, any(r["date"] == today.isoformat() for r in snapshot["recent_rides"]))
+    history = db.chat(HISTORY + 1)
+    c = addressed(db, cfg, today, history[-1]["coach"] if history else None)
+    two = len(cfg.active_sports(today)) > 1
+    # Two sports: one hard-day limit for the week (the primary coach's), whichever coach changes it
+    rules = coach.week_rules(db, cfg, ws, today) if two else c.rules(cfg.athlete_level, coach.weeks_with_coach(db, c.key, ws))
+    kind = sports.ACTIVITY_KIND[c.sport]
+    dates = open_dates(plan, today, any(r["date"] == today.isoformat() and r.get("sport", "ride") == kind
+                                        for r in snapshot["recent_rides"]))
     notes = db.active_notes(today.isoformat())
     facts = db.memories()[-memory.MAX_FACTS:]
 
-    history = db.chat(HISTORY + 1)
     messages = []
     for m in history[:-1]:
         text = m["content"]
         if m.get("kind") == "checkin":
             text = f"[Your daily check-in]\n{text}"
         if m["role"] == "assistant" and m["coach"] != c.key:
-            text = f"[Earlier coach: {coaches.name_of(m['coach'])}]\n{text}"
+            text = f"[{'Your colleague' if m['coach'] in {x.key for x in chat_coaches(db, cfg, today)} else 'Earlier coach'}: " \
+                   f"{coaches.name_of(m['coach'])}]\n{text}"
+        if m["role"] == "user" and m["coach"] != c.key:
+            text = f"[To {coaches.name_of(m['coach'])}]\n{text}"
         if m["role"] == "assistant" and m["proposal"]:
             text += f"\n[Proposed changes for {', '.join(d['date'] for d in m['proposal']['days'])}"
             text += ", applied]" if m["applied_plan_id"] else ", not applied]"
@@ -163,7 +224,9 @@ async def respond(db: DB, cfg: Config, snapshot: dict, today: date) -> int:
         snapshot = snapshot | {"athlete_history": {k: v for k, v in snapshot["athlete_history"].items() if k != "memory"}}
     context = {
         "open_dates": dates,
-        "active_plan": {"coach": coaches.name_of(plan["coach"]), "week_focus": plan["payload"]["week_focus"],
+        "your_sport": c.sport,
+        "active_plan": {"your_sport_planned_by": coaches.name_of(memory.plan_coach(plan, c.sport)),
+                        "week_focus": plan["payload"]["week_focus"],
                         "block_week": plan["payload"].get("block_week"),
                         "days": strip_cues(plan["payload"]["days"])} if plan else None,
         "coach_notes": notes,
@@ -175,8 +238,8 @@ async def respond(db: DB, cfg: Config, snapshot: dict, today: date) -> int:
         messages.pop(0)
 
     result, warnings = await coach.run_validated(
-        cfg, db, coach.system_prompt(c, rules) + ADDENDUM, messages, CHAT_SCHEMA,
-        checker(plan, dates, cfg, snapshot, today, rules), purpose="chat", effort="medium", max_tokens=16000)
+        cfg, db, coach.system_prompt(c, rules, "chat" if two else None) + ADDENDUM, messages, chat_schema(c.sport),
+        checker(plan, dates, cfg, snapshot, today, rules, c), purpose="chat", effort="medium", max_tokens=16000)
 
     now = datetime.now().isoformat(timespec="seconds")
     known = {n["id"] for n in notes}
@@ -199,7 +262,8 @@ async def respond(db: DB, cfg: Config, snapshot: dict, today: date) -> int:
         end = max(start, end)
         db.add_note(now, n["kind"], start.isoformat(), end.isoformat(), n["text"].strip())
         saved.append(f"{n['text'].strip()} ({_span(start, end)})")
-    proposal = {"plan_id": plan["id"], "days": result["plan_changes"]} if plan and result["plan_changes"] else None
+    proposal = ({"plan_id": plan["id"], "sport": c.sport, "days": coach.tag(result["plan_changes"], c.sport, c.key)}
+                if plan and result["plan_changes"] else None)
     return db.add_chat(now, "assistant", c.key, result["reply"], proposal, warnings if proposal else [], saved, remembered)
 
 
@@ -218,8 +282,9 @@ def apply(db: DB, msg: dict, today: date) -> tuple[int | None, str]:
     if any(d["date"] < today.isoformat() for d in prop["days"]):
         return None, "This proposal changes days that are already past. Ask again."
     payload = copy.deepcopy(base["payload"])
-    changed = {d["date"]: d for d in prop["days"]}
-    payload["days"] = [changed.get(d["date"], d) for d in payload["days"]]
+    changed = prop["days"]
+    payload["days"] = replace_days(payload["days"], coach.tag(copy.deepcopy(changed), prop.get("sport", "cycling"),
+                                                               changed[0].get("coach") or msg["coach"]))
     payload["revised_from"] = base["id"]
     plan_id = db.save_plan(base["week_start"], datetime.now().isoformat(timespec="seconds"), base["model"],
                            payload, msg["warnings"], base["coach"])

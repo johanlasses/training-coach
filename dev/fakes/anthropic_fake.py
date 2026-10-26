@@ -35,6 +35,21 @@ def day(iso: str, minutes: int) -> dict:
     return d
 
 
+def run_day(iso: str, minutes: int) -> dict:
+    """A running coach's day (0.11.0): the run schema has no steps, a pace and a surface instead."""
+    d = {"date": iso, "kind": "rest", "title": "Rest", "description": "Rest day.", "duration_min": 0,
+         "intensity": "recovery", "target_tss": 0, "target_pace": "", "surface": "none"}
+    if minutes >= 30:
+        return d | {"kind": "run", "title": "Easy run", "description": "Conversational. Short on time: 20 min.",
+                    "duration_min": 30, "intensity": "endurance", "target_tss": 30, "target_pace": "5:50–6:10/km",
+                    "surface": "road"}
+    return d
+
+
+def is_run(schema_days: dict) -> bool:
+    return "run" in schema_days.get("properties", {}).get("kind", {}).get("enum", [])
+
+
 def fenced_json(text: str) -> dict:
     m = re.search(r"```json\n(.*?)\n```", text, re.S)
     return json.loads(m.group(1)) if m else {}
@@ -45,13 +60,18 @@ def last_user_text(messages: list[dict]) -> str:
     return c if isinstance(c, str) else " ".join(b.get("text", "") for b in c if isinstance(b, dict))
 
 
-def plan_reply(messages: list[dict]) -> dict:
+def plan_reply(messages: list[dict], run: bool = False) -> dict:
+    """Rides on every other day; with run (the second coach of a two-sport week), two easy runs on the days between."""
     first = next(m for m in messages if m["role"] == "user")
     text = first["content"] if isinstance(first["content"], str) else first["content"][0]["text"]
-    dates = re.search(r"Plan these days: ([\d, -]+)\.", text).group(1).split(", ")
+    dates = re.search(r"Plan these (?:\w+ )?days: ([\d, -]+)\.", text).group(1).split(", ")
     avail = list(fenced_json(text).get("snapshot", {}).get("availability", {}).values())
     retry = len(messages) > 1
     bad = state["mode"] == "invalid-plan-always" or (state["mode"] == "invalid-plan" and not retry)
+    if run:
+        runs = [d for i, d in enumerate(dates) if i % 2 == 1 and len(avail) == 7 and avail[date.fromisoformat(d).weekday()] >= 30][:2]
+        days = [run_day(d, 30 if d in runs else 0) for d in dates]
+        return {"week_focus": "Easy running (dev fake)", "rationale": "Two easy runs from the dev fake.", "days": days}
     days = [day(d, avail[date.fromisoformat(d).weekday()] if i % 2 == 0 and len(avail) == 7 else 0)
             for i, d in enumerate(dates)]
     if bad:
@@ -60,14 +80,14 @@ def plan_reply(messages: list[dict]) -> dict:
             "days": days}
 
 
-def chat_reply(messages: list[dict]) -> dict:
+def chat_reply(messages: list[dict], run: bool = False) -> dict:
     text = last_user_text(messages)
     ctx = fenced_json(text)
     ask = text.split("```json")[0].lower()
-    out = {"reply": "Dev fake coach here. I saw your message.", "plan_changes": [], "add_notes": [],
-           "remove_note_ids": [], "remember": [], "forget_memory_ids": []}
+    out = {"reply": f"Dev fake {ctx.get('your_sport', 'cycling')} coach here. I saw your message.", "plan_changes": [],
+           "add_notes": [], "remove_note_ids": [], "remember": [], "forget_memory_ids": []}
     if "rest" in ask and ctx.get("open_dates"):
-        out["plan_changes"] = [day(ctx["open_dates"][0], 0)]
+        out["plan_changes"] = [(run_day if run else day)(ctx["open_dates"][0], 0)]
         out["reply"] = f"Made {ctx['open_dates'][0]} a rest day. Apply it with the button."
     if "remember" in ask:
         out["remember"] = ["Dev fact: " + ask.strip()[:80]]
@@ -84,9 +104,9 @@ def reply_for(body: dict) -> str:
     props = schema.get("properties", {})
     messages = body["messages"]
     if "week_focus" in props:
-        return json.dumps(plan_reply(messages))
+        return json.dumps(plan_reply(messages, is_run(props["days"]["items"])))
     if "plan_changes" in props:
-        return json.dumps(chat_reply(messages))
+        return json.dumps(chat_reply(messages, is_run(props["plan_changes"]["items"])))
     if "headline" in props:
         return json.dumps(feedback_reply())
     if list(props) == ["message"]:

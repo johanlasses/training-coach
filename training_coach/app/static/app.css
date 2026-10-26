@@ -221,6 +221,13 @@ nav a { position: relative; }
 .workout-svg { width: 100%; height: 64px; margin-top: 8px; display: block; border-bottom: 1px solid var(--axis); }
 .workout-svg .ftp-line { stroke: var(--text-muted); stroke-dasharray: 3 3; stroke-width: 1; vector-effect: non-scaling-stroke; }
 .steps { font-size: 13px; color: var(--text-secondary); margin: 8px 0 0; padding-left: 18px; }
+/* Chat with two coaches: who the next message goes to */
+.coach-pick { display: flex; gap: 8px; flex: 1 1 220px; max-width: 360px; }
+.coach-pick .btn { flex: 1 1 0; text-align: center; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* Plan page with two sports: which sport a session is */
+.sport-tag { display: inline-block; font-size: 11px; font-weight: 600; padding: 0 6px; border-radius: 8px;
+  color: var(--page); background: var(--series-1); }
+.sport-tag.s-running { background: var(--series-2); }
 .status-pill { font-size: 12px; display: inline-flex; gap: 6px; align-items: center; }
 .status-pill .icon { font-weight: 700; }
 .s-done .icon { color: var(--good); }
@@ -253,6 +260,8 @@ table.zones td.num { width: 90px; text-align: right; white-space: nowrap; }
   border-radius: var(--radius-sm);
   border: 1px solid var(--axis); background: var(--page); color: var(--text-primary);
 }
+/* iOS Safari draws an empty date field collapsed and ignores width: give it the text fields' box */
+.form-page input[type=date] { -webkit-appearance: none; appearance: none; min-height: var(--control-h); min-width: 0; text-align: left; }
 .form-page textarea { resize: vertical; min-height: 96px; height: auto; padding: 7px 10px; }
 .form-page input:disabled { opacity: .5; }
 .form-page label.choice { display: flex; gap: 10px; align-items: flex-start; color: var(--text-primary); font-size: 14px; }
@@ -268,6 +277,11 @@ table.zones td.num { width: 90px; text-align: right; white-space: nowrap; }
 .form-page .grid2.wide-first { grid-template-columns: 2fr 1fr; }
 .form-page .grid3 { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 0 16px; }
 .form-page h3 { font-size: 14px; margin: 16px 0 8px; }
+/* Profile → Sports: one block per sport, its Active toggle beside the name */
+.sport-block { border-bottom: 1px solid var(--grid); margin-bottom: 12px; }
+.sport-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 12px; }
+.sport-head h3 { margin: 4px 0 8px; }
+.sport-head .facts { font-size: 13px; color: var(--text-muted); }
 .form-page label.inline small.hint { display: inline; margin: 0 0 0 4px; }
 table.usage { margin-bottom: 8px; }
 .form-page .hint-row { font-size: 14px; margin: 0 0 12px; }
@@ -282,13 +296,13 @@ table.usage td.num { width: auto; }
 body.page-coach { height: 100vh; height: 100dvh; display: flex; flex-direction: column; }
 .page-coach main { flex: 1; min-height: 0; width: 100%; display: flex; flex-direction: column; }
 .chat-layout { flex: 1; min-height: 240px; grid-template-rows: minmax(0, 1fr); }  /* below that the page scrolls, never clips the composer */
-.chat-panel { display: flex; flex-direction: column; min-height: 0; background: var(--surface-1);
+.chat-col { display: flex; flex-direction: column; min-height: 0; }
+.chat-panel { flex: 1; display: flex; flex-direction: column; min-height: 0; background: var(--surface-1);
   border: 1px solid var(--border); border-radius: var(--radius); }
-.chat-head { position: relative; display: flex; align-items: center; gap: 10px; padding: 10px 14px;
-  border-bottom: 1px solid var(--border); }
-.chat-head h2 { margin: 0; font-size: 16px; }
-.chat-title { flex: 1; min-width: 0; }
-.chat-title .muted { font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* The head is Plan's and Analysis's; the Notes popover hangs from it, and its buttons stay beside the title */
+.chat-top { position: relative; margin-bottom: 12px; }
+.chat-top .muted { font-size: 13px; }
+.chat-actions { display: flex; gap: 8px; }
 .chat-panel > .notice { margin: 10px 14px 0; }
 .chat-scroll { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; display: flex; flex-direction: column;
   gap: 3px; padding: 4px 14px 14px; background: var(--page); }
@@ -338,8 +352,11 @@ body.page-coach { height: 100vh; height: 100dvh; display: flex; flex-direction: 
 @media (max-width: 700px) {
   .page-coach main { padding: 0; }
   .page-coach main > .notice { margin: 8px 12px; max-height: 5.5em; overflow-y: auto; }
-  .chat-panel { border: 0; border-radius: 0; }
-  .chat-head { padding: 8px 12px; }
+  .chat-panel { border: 0; border-radius: 0; border-top: 1px solid var(--border); }
+  .chat-top { padding: 8px 12px 0; margin-bottom: 8px; gap: 8px; }
+  .chat-top .head-title { text-align: left; flex: 1 1 0; }
+  .chat-top .chat-actions, .chat-top .chat-actions button { width: auto; margin-left: 0; }  /* beside the title, not below */
+  .coach-pick { order: 3; flex-basis: 100%; max-width: none; }
   .chat-scroll { padding: 2px 10px 12px; }
   .chat-composer { padding: 8px 10px; }
   .avatar, .avatar-gap { width: 28px; }

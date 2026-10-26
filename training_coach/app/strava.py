@@ -10,6 +10,7 @@ from urllib.parse import parse_qs, urlencode, urlparse
 import httpx
 
 from .db import DB
+from .sports import RIDE_TYPES  # noqa: F401 - kept importable from here
 
 log = logging.getLogger(__name__)
 
@@ -23,7 +24,6 @@ TOKEN_URL = f"{BASE}/oauth/token"
 REDIRECT_URI = "http://localhost/strava-callback"
 SCOPES = "read,activity:read_all,profile:read_all"
 
-RIDE_TYPES = {"Ride", "VirtualRide", "GravelRide", "MountainBikeRide"}
 
 # Strava's read limits: 100 per 15 min (windows reset at :00/:15/:30/:45) and 1000 per day (reset at
 # midnight UTC). Backfilling streams stops this far below the daily limit so syncs can still list new rides.

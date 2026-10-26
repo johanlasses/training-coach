@@ -27,11 +27,39 @@ Then open **Profile**:
 
 ## Coaches
 
-There are three coaching styles, and you pick the default one on **Profile**:
+You pick a coach per sport on **Profile → Sports**. Cycling:
 
 - **Pogačar (San Millán)**: lots of zone 2, few but hard sessions.
 - **Carmichael (Time-Crunched)**: little time and high intensity, with 3–4 interval sessions a week.
 - **Next Level**: takes you from your current level to the next with classic periodisation.
+
+Running:
+
+- **Almgren (double threshold)**: easy running, controlled threshold work, hills and strides; double threshold only
+  with high running volume (about 75 km a week).
+- **Next Level Run**: 80/20 running around work and family, with a growing long run, deloads and strength work.
+
+### Two sports
+
+Each sport is **Active** or **On hold**, with an optional end date after which it goes back on hold by itself (a
+cyclist running for the two weeks the bike can't travel: running active until the trip ends, cycling on hold). At
+least one sport stays active; when an end date puts the last one on hold, your **primary sport** comes back.
+
+With both active, the primary sport's coach plans first and the other coach plans around those sessions. A day may
+hold a ride and a run if both fit that day's minutes. Hard days and the weekly load cap count both sports: a hard
+run the day after bike intervals is two hard days in a row. The Plan page shows one week, each session tagged
+**Ride** or **Run**; runs are text only (pace, HR ceiling, structure). In the Coach chat a picker sets who you're
+writing to, and each coach only changes their own sport's days.
+
+**Run volume comes from your running history, not your cycling fitness.** A fit cyclist's heart is ready long before
+tendons and bones are, so the coach keeps the week's running within about 10% of your last 4 weeks (with a
+return-to-run floor of 60–90 minutes a week), no single run much longer than your longest of the last 30 days, and
+no hard runs in your first 2 weeks back after a break. Set your threshold pace (what you could race for an hour,
+e.g. `4:45`) and running threshold HR on Profile; without them, the pace is estimated from your runs and the HR is
+your cycling threshold HR + 5.
+
+Runs, walks and hikes sync from Strava or Garmin. Walks count toward load at an easy 20 TSS an hour, never notify,
+and a walk of 45 minutes or more completes a planned recovery session.
 
 **Plan** and **Analysis** work with your coach from Profile. Switch coach there and the Plan page shows that coach's
 plan for the week, or offers to make one. A week your coach didn't plan (an old one, say) shows the plan that was
@@ -197,8 +225,8 @@ total.
 
 | Call | Model | Why |
 |---|---|---|
-| Weekly plan | Opus 5.5, high effort | Hard rules, a validator and a structured workout; it runs about once a week |
-| Analysis | Opus 5.5, high effort | The deep read of your training; about once a week |
+| Weekly plan | Sonnet 5.5, high effort | Hard rules, a validator and a structured workout; it runs about once a week |
+| Analysis | Sonnet 5.5, high effort | The deep read of your training; about once a week |
 | Coach chat | Sonnet 5.5, medium effort | Interactive, so it's faster. Plan edits are still checked and retried |
 | Ride feedback | Haiku 5.5 | The add-on computes the numbers; the model only judges and writes. It runs after every ride |
 | Daily check-in | Haiku 5.5 | Same idea as ride feedback: the numbers are computed, the model writes 2–4 sentences |

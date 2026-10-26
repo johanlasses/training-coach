@@ -13,7 +13,7 @@
   <form method="post" action="{{ base }}/plan?week={{ week.isoformat() }}" class="plan-action">
     {% set planning = jobs.plan and jobs.plan.running %}
     <button {{ 'disabled' if not ai_ok or planning or needs_profile }}>
-      {% if planning %}{{ coach | coach_short }} is planning…{% elif plan and plan.coach == coach %}Re-plan remaining days{% else %}Plan with {{ coach | coach_short }}{% endif %}</button>
+      {% if planning %}{{ coach_names }} {{ 'are' if ' and ' in coach_names else 'is' }} planning…{% elif plan and plan.coach == coach %}Re-plan remaining days{% else %}Plan with {{ coach_names }}{% endif %}</button>
   </form>
   {% endif %}
 </div>
@@ -37,7 +37,12 @@
   <p class="notice in-card">This week runs on {{ active_coach | coach_name }}'s plan: today's session and notifications
     come from it. <b>Use this plan</b> switches to this one.</p>
   {% endif %}
-  <p class="flush">{{ p.rationale }}</p>
+  {% if p.sports and p.sports | length > 1 %}
+  {% for sport, sp in p.sports.items() %}
+  <p class="flush"><b>{{ {'cycling': 'Cycling', 'running': 'Running'}[sport] }} · {{ sp.coach | coach_name }}:</b>
+    {% if not loop.first %}{{ sp.week_focus }}. {% endif %}{{ sp.rationale }}</p>
+  {% endfor %}
+  {% else %}<p class="flush">{{ p.rationale }}</p>{% endif %}
   {% if plan.warnings %}
   <div class="notice error in-card"><b>The plan still breaks some rules — use judgement:</b>
     <ul>{% for w in plan.warnings %}<li>{{ w }}</li>{% endfor %}</ul></div>
@@ -47,15 +52,18 @@
 <div class="week">
 {% for d in p.days %}
   {% set dd = d.date %}
+  {% set k = dd ~ '/' ~ (d.sport or 'cycling') %}
   <div class="day {{ 'today' if dd == today }}">
     <div>
       <div class="date">{{ week.fromisoformat(dd).strftime('%a %-d %b') }}</div>
       <div class="facts">{% if d.kind != 'rest' %}{{ d.duration_min }} min · TSS {{ d.target_tss }}{% endif %}</div>
-      <div class="pill-row">{{ status_pill(status[dd]) }}</div>
+      <div class="pill-row">{{ status_pill(status[k]) }}</div>
     </div>
     <div>
       <h3>{{ d.title }}</h3>
-      <div class="facts">{{ {'zwift': 'Zwift', 'outdoor': 'Outdoor · ' ~ d.bike, 'rest': 'Rest'}[d.kind] }} · {{ d.intensity }}</div>
+      <div class="facts">{% if two_sports and d.kind != 'rest' %}<span class="sport-tag s-{{ d.sport or 'cycling' }}">{{ 'Run' if d.sport == 'running' else 'Ride' }}</span> {{ d.coach | coach_short }} · {% endif %}
+        {{- {'zwift': 'Zwift', 'outdoor': 'Outdoor · ' ~ d.bike, 'run': (d.surface | capitalize) if two_sports else 'Run · ' ~ d.surface, 'rest': 'Rest'}[d.kind] }} · {{ d.intensity }}
+        {%- if d.target_pace %} · {{ d.target_pace }}{% endif %}</div>
       <p>{{ d.description }}</p>
       {% if d.kind == 'outdoor' %}
         {% if d.terrain %}<p class="facts"><b>Terrain:</b> {{ d.terrain }}</p>{% endif %}
@@ -73,7 +81,7 @@
         {% endfor %}
         </ol></details>
       {% endif %}
-      {% if dd in tests %}{% set ftp, basis = tests[dd] %}
+      {% if dd in tests and d.kind != 'run' %}{% set ftp, basis = tests[dd] %}
       <div class="test-result">
         <p class="flush"><b>Estimated FTP {{ ftp }} W</b> <span class="facts">· {{ basis }}</span></p>
         {% if dd not in applied_tests %}
@@ -85,8 +93,8 @@
         {% else %}<p class="facts">✓ Your FTP from this day on</p>{% endif %}
       </div>
       {% endif %}
-      {% for a in by_day.get(dd, []) %}
-        <p class="facts">Ridden: <a href="{{ base }}/activity/{{ a.id }}">{{ a.name }}</a> ·
+      {% for a in matched.get(k, []) %}
+        <p class="facts">{{ 'Run' if a.sport_type in ('Run', 'TrailRun', 'VirtualRun') else 'Walked' if a.sport_type in ('Walk', 'Hike') else 'Ridden' }}: <a href="{{ base }}/activity/{{ a.id }}">{{ a.name }}</a> ·
           {{ a.moving_time | duration }} · TSS {{ (a.tss or 0) | round | int }}</p>
       {% endfor %}
     </div>
@@ -95,7 +103,7 @@
         {#- Any day, past ones too: a missed session can be ridden later -#}
         {% set sent = uploads.get(plan.id ~ '/' ~ dd) %}
         {#- Past and done days get the quiet style: scrolling back mustn't be a wall of orange buttons -#}
-        {% set quiet = sent or dd < today or status[dd] == 'done' %}
+        {% set quiet = sent or dd < today or status[k] == 'done' %}
         {% if workout_app_ok %}
         <form method="post" action="{{ base }}/plan/{{ plan.id }}/{{ dd }}/{{ workout_app }}" class="zwift-send">
           <button class="{{ 'secondary' if quiet }}">{{ 'Send again' if sent else 'Send to ' ~ workout_app_name }}</button></form>

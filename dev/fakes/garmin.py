@@ -18,7 +18,8 @@ state = {"tokens": 0}
 
 
 def activities() -> list[dict]:
-    """Rides every other day over the last 6 weeks (Zwift and road), plus walks the sync must leave out."""
+    """Rides every other day over the last 6 weeks (Zwift and road), plus walks and treadmill runs (kept since 0.11.0)
+    and yoga the sync must leave out."""
     out, today = [], date.today()
     for n in range(42, 0, -2):
         day = today - timedelta(days=n)
@@ -36,6 +37,12 @@ def activities() -> list[dict]:
             out.append({"activityId": 8_000_000 + n, "activityName": "Walk", "activityType": {"typeKey": "walking"},
                         "startTimeLocal": f"{day} 12:00:00", "startTimeGMT": f"{day} 10:00:00", "duration": 3600.0,
                         "movingDuration": 3500.0, "distance": 5000.0})
+        if n % 8 == 0:
+            out.append({"activityId": 7_000_000 + n, "activityName": "Treadmill", "activityType": {"typeKey": "treadmill_running"},
+                        "startTimeLocal": f"{day} 06:30:00", "startTimeGMT": f"{day} 04:30:00", "duration": 1800.0,
+                        "movingDuration": 1800.0, "distance": 5400.0, "averageHR": 148.0, "maxHR": 160.0, "averageSpeed": 3.0})
+            out.append({"activityId": 6_000_000 + n, "activityName": "Yoga", "activityType": {"typeKey": "yoga"},
+                        "startTimeLocal": f"{day} 20:00:00", "startTimeGMT": f"{day} 18:00:00", "duration": 1800.0})
     return out
 
 

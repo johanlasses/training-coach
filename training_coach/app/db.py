@@ -204,8 +204,10 @@ class DB:
         return _row(r) if r else None
 
     def activities_missing_streams(self, limit: int) -> list[dict]:
+        """Newest first. Walks never: a stream call (Strava's rate limit) for a dog walk's HR sparkline isn't worth it."""
         rows = self.conn.execute(
-            "SELECT * FROM activities WHERE streams_fetched=0 ORDER BY start_date DESC LIMIT ?", (limit,)
+            "SELECT * FROM activities WHERE streams_fetched=0 AND sport_type NOT IN ('Walk', 'Hike') "
+            "ORDER BY start_date DESC LIMIT ?", (limit,)
         ).fetchall()
         return [_row(r) for r in rows]
 

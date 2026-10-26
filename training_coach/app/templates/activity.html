@@ -15,7 +15,7 @@
   <div class="report-body">{{ fb_html | safe }}</div>
   <p class="msg-meta">{{ fb_coach }} · {{ a.feedback.at[:16] | replace('T', ' ') }}</p>
   {% elif (jobs.ride_feedback and jobs.ride_feedback.running) or (jobs.feedback and jobs.feedback.running and not a.notified) %}
-  <p class="muted flush">The coach is writing feedback on this ride…</p>
+  <p class="muted flush">The coach is writing feedback on this {{ 'ride' if a | is_ride else 'session' }}…</p>
   {% elif ai_ok %}
   <div class="card-head"><p class="muted flush">No coach feedback on this ride yet.</p>
     <form method="post" action="{{ base }}/activity/{{ a.id }}/feedback"><button>Ask the coach</button></form></div>
@@ -27,8 +27,9 @@
 <div class="tiles">
   <div class="tile"><div class="label">Distance</div><div class="value">{{ ((a.distance or 0) / 1000) | round(1) }} <small>km</small></div></div>
   <div class="tile"><div class="label">Moving time</div><div class="value">{{ a.moving_time | duration }}</div></div>
+  {% if not (a | is_ride) and a | pace %}<div class="tile"><div class="label">Pace</div><div class="value">{{ (a | pace) | replace('/km', '') }} <small>/km</small></div></div>{% endif %}
   <div class="tile"><div class="label">Elevation</div><div class="value">{{ (a.elevation_gain or 0) | round | int }} <small>m</small></div></div>
-  {% if a.np %}<div class="tile"><div class="label">Normalized power</div><div class="value">{{ a.np | round | int }} <small>W</small></div>
+  {% if a.np and a | is_ride %}<div class="tile"><div class="label">Normalized power</div><div class="value">{{ a.np | round | int }} <small>W</small></div>
     <div class="sub">avg {{ (a.avg_watts or 0) | round | int }} W · max {{ (a.max_watts or 0) | round | int }} W</div></div>{% endif %}
   <div class="tile"><div class="label">TSS</div><div class="value">{{ (a.tss or 0) | round | int }}</div>
     <div class="sub">{% if a.intensity %}IF {{ '%.2f' % a.intensity }} · {% endif %}from {{ a.tss_source }}{% if a.ftp_used %} · FTP {{ a.ftp_used | round | int }} W{% endif %}</div></div>
@@ -36,7 +37,7 @@
     <div class="sub">max {{ (a.max_hr or 0) | round | int }}</div></div>{% endif %}
   {% if a.decoupling is not none %}<div class="tile"><div class="label">Pw:HR decoupling</div><div class="value">{{ a.decoupling }}<small>%</small></div>
     <div class="sub">{{ 'well coupled (< 5%)' if a.decoupling < 5 else 'aerobic drift — durability limiter' }}</div></div>{% endif %}
-  {% if a.kilojoules %}<div class="tile"><div class="label">Work</div><div class="value">{{ a.kilojoules | round | int }} <small>kJ</small></div></div>{% endif %}
+  {% if a.kilojoules and a | is_ride %}<div class="tile"><div class="label">Work</div><div class="value">{{ a.kilojoules | round | int }} <small>kJ</small></div></div>{% endif %}
 </div>
 
 {% if a.spark_watts and a.ftp_used %}

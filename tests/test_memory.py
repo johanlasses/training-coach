@@ -55,14 +55,14 @@ def context_of(call, i=-1):
 
 def test_profile_changes_are_logged_once(client):
     st = main.app.state.st
-    client.post("/profile", data={"goals": "Gravel 160 km in June", "default_coach": "carmichael", "weight_kg": "76.5",
+    client.post("/profile", data={"goals": "Gravel 160 km in June", "cycling_coach": "carmichael", "weight_kg": "76.5",
                                   "ftp_override": "280", "availability": "1", "available_days": ["mon", "wed", "sat"]})
     texts = [e["text"] for e in st.db.log_entries()]
     assert "Goals: none → “Gravel 160 km in June”" in texts
-    assert "Coach: Next Level → Carmichael (Time-Crunched)" in texts
+    assert "Cycling coach: Next Level → Carmichael (Time-Crunched)" in texts
     assert "Weight: 75 kg → 76.5 kg" in texts and "FTP override: auto → 280 W" in texts
     assert "Training days: Mon, Tue, Wed, Thu, Sat, Sun → Mon, Wed, Sat" in texts
-    assert st.db.last_log("coach", "9999")["data"] == {"from": "nextlevel", "to": "carmichael"}
+    assert st.db.last_log("coach", "9999")["data"] == {"from": "nextlevel", "to": "carmichael", "sport": "cycling"}
     client.post("/profile", data={"goals": "Gravel 160 km in June", "weight_kg": "76.5"})  # nothing changed
     client.post("/settings", data={"notify_service": "notify.other"})  # not athlete data
     assert len(st.db.log_entries()) == len(texts)
@@ -166,10 +166,10 @@ def test_switching_coach_hands_over_the_chat(client):
     st.db.save_plan(stats.week_start(today).isoformat(), "2000-01-01T00:00:00", "m", {
         "week_focus": "x", "rationale": "", "block_week": 1, "days": [day(today.isoformat(), "zwift", 60, "endurance")]},
         [], "nextlevel")
-    assert "Took over" not in client.get("/coach").text
-    client.post("/profile", data={"default_coach": "pogacar"})
+    assert "took over" not in client.get("/coach").text
+    client.post("/profile", data={"cycling_coach": "pogacar"})
     html = client.get("/coach").text
-    assert "<h2>Pogačar (San Millán)</h2>" in html and "the plan is by Next Level" in html
+    assert "Pogačar (San Millán) · took over this week" in html and "the plan is by Next Level" in html
 
 
 # --- who reads it -------------------------------------------------------------

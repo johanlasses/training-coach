@@ -42,13 +42,19 @@ CI (`.github/workflows/test.yml`) runs ruff and pytest on push.
 - **Sources:** rides come from `State.source` (Strava or Garmin, `cfg.activity_source`), health from Apple Health via HA or
   Garmin (`cfg.health_source`, `health.enabled`). `sync.sync` takes any `Source`. Switching a source clears what the old
   one brought (ride ids could collide; Garmin rMSSD and Apple SDNN must not share a baseline).
+- **Sports (0.11.0):** activities are rides, runs or walks by `sports.kind()`; never compare sport types elsewhere.
+  Power numbers (NP, power curve, zones, eFTP, Send to Zwift) are rides only. Plan days carry `sport` and `coach`
+  (none = cycling, pre-0.11.0); a date holds at most one session per sport, keyed by `sports.day_key`. One plan row per
+  week holds both sports; `memory.plan_coach(plan, sport)` says who planned a sport. Run volume is guarded from
+  running history (`stats.running`, `coach.run_errors`), never from CTL. With two sports, the hard-day limit is the
+  primary coach's (`coach.week_rules`), whichever coach plans or chats.
 - **No weather logic.** It was removed on purpose (too complex, little value). Outdoor vs Zwift comes from season and daylight
   (`app/season.py`), and the athlete swaps days themselves.
 - **Ingress:** every URL in templates and redirects must be prefixed with `{{ base }}` / `back(request, …)`.
 - **Anthropic SDK 1.x uses httpx2.** respx can't mock it. Inject `httpx2.MockTransport` (see `tests/test_llm.py`).
-  One model per purpose in `llm.MODELS`: Opus 5.5 for plan and analysis, Sonnet 5.5 for chat, Haiku 5.5 for ride
-  feedback. Adaptive thinking; `fallbacks="default"` with beta `server-side-fallback-2026-07-01` only on Opus and
-  Sonnet (Haiku has no server-side fallback).
+  One model per purpose in `llm.MODELS`: Sonnet 5.5 for plan and analysis (high effort) and chat (medium), Haiku 5.5
+  for ride feedback and the check-in (since 0.11.0, to save money; Opus 5.5 before). Adaptive thinking;
+  `fallbacks="default"` with beta `server-side-fallback-2026-07-01` only on Sonnet (Haiku has no server-side fallback).
 - **Ride feedback is event-driven, not scheduled:** it runs after each sync for rides from the last 48 h
   (`feedback.after_sync`), once per ride (`activities.notified`). It's always on with an API key.
 - **Strava rate limits:** stream fetches are capped per sync run and stop near the 15-minute limit. Keep it that way.

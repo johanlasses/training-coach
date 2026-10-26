@@ -7,10 +7,10 @@ from typing import Protocol
 
 import httpx
 
-from . import metrics
+from . import metrics, sports
 from .config import Config
 from .db import DB
-from .strava import RIDE_TYPES, RateLimited
+from .strava import RateLimited
 
 log = logging.getLogger(__name__)
 
@@ -33,7 +33,9 @@ async def sync(db: DB, strava: Source, cfg: Config) -> dict:
     """One sync pass. Safe to call repeatedly; backfills streams gradually within rate limits."""
     now = datetime.now(timezone.utc)
     last = db.get("last_activity_start")
-    if last:
+    # Runs and walks sync since 0.11.0: a DB from before lists the whole year once, or the run history (and the run
+    # durability guard built on it) would start two weeks ago
+    if last and db.get("kinds_backfilled"):
         after = datetime.fromisoformat(last.replace("Z", "+00:00")) - timedelta(days=RESYNC_DAYS)
     else:
         after = now - timedelta(days=BACKFILL_DAYS)
@@ -46,8 +48,9 @@ async def sync(db: DB, strava: Source, cfg: Config) -> dict:
         result = (db.get("last_sync") or {}) | {"at": now.isoformat(timespec="seconds"), "rate_limited": str(e)}
         db.set("last_sync", result)
         return result
-    rides = [s for s in map(strava.summary, listed) if s["sport_type"] in RIDE_TYPES]
+    rides = [s for s in map(strava.summary, listed) if s["sport_type"] in sports.KEPT]  # rides, runs and walks
     new = sum(db.upsert_activity_summary(a) for a in rides)
+    db.set("kinds_backfilled", True)
     if db.get("mark_notified"):  # the first sync after a source switch: these rides had their push from the old source
         db.mark_all_notified()
         db.set("mark_notified", None)
@@ -69,7 +72,7 @@ async def sync(db: DB, strava: Source, cfg: Config) -> dict:
                 # Manual or private activities have no streams. Mark them done, or every sync dies on them.
                 log.warning("No streams for activity %s (404), skipping", a["id"])
                 s = {}
-            db.update_activity(a["id"], streams_fetched=1, **process_streams(s))
+            db.update_activity(a["id"], streams_fetched=1, **process_streams(s, ride=sports.is_ride(a)))
             fetched += 1
     except RateLimited as e:
         log.info("Stopping stream fetch: %s", e)
@@ -84,10 +87,12 @@ async def sync(db: DB, strava: Source, cfg: Config) -> dict:
     return result
 
 
-def process_streams(s: dict[str, list]) -> dict:
+def process_streams(s: dict[str, list], ride: bool = True) -> dict:
+    """Power numbers only for rides: running power (a Stryd) isn't cycling power, and must never reach the power
+    curve, zones or eFTP."""
     times = s.get("time") or []
     out: dict = {}
-    watts = metrics.resample_1hz(times, s["watts"]) if s.get("watts") else []
+    watts = metrics.resample_1hz(times, s["watts"]) if s.get("watts") and ride else []
     hr = metrics.resample_1hz(times, s["heartrate"]) if s.get("heartrate") else []
     if watts and max(watts) > 0:
         out["np"] = metrics.normalized_power(watts)
@@ -112,15 +117,48 @@ def ftp_at(acts_by_date: list[dict], day: date, override: int, tests: list[dict]
         return float(max(valid, key=lambda t: t["date"])["ftp"]), "test"
     lo = (day - timedelta(days=EFTP_WINDOW_DAYS)).isoformat()
     hi = (day + timedelta(days=1)).isoformat()
-    curves = [a["mmp"] for a in acts_by_date if a.get("mmp") and lo <= a["start_date_local"] < hi]
+    curves = [a["mmp"] for a in acts_by_date if a.get("mmp") and sports.is_ride(a) and lo <= a["start_date_local"] < hi]
     e = metrics.eftp_from_mmp(metrics.best_curve(curves))
     return (float(e), "eftp") if e else (float(DEFAULT_FTP), "default")
+
+
+def threshold_pace_at(acts: list[dict], day: date, cfg: Config) -> float | None:
+    """Threshold pace (s/km) on `day`: the Profile's, else estimated from the 90 days of runs before it."""
+    if cfg.threshold_pace:
+        return float(cfg.threshold_pace)
+    lo, hi = (day - timedelta(days=EFTP_WINDOW_DAYS)).isoformat(), (day + timedelta(days=1)).isoformat()
+    # Runs with long stops (standing recoveries between reps) average out at rep pace: leave them out
+    return metrics.threshold_pace([(a["moving_time"] or 0, a["avg_speed"] or 0) for a in sports.runs(acts)
+                                   if lo <= a["start_date_local"] < hi
+                                   and (a["elapsed_time"] or 0) <= 1.15 * (a["moving_time"] or 0)])
+
+
+def run_load(a: dict, acts: list[dict], cfg: Config) -> tuple[float, float | None, str]:
+    """(TSS, IF, source) for a run or walk. A run: hrTSS against the running threshold HR first (pace misreads hills,
+    trails and treadmills), else rTSS from pace, else a flat estimate. A walk: always the flat 20 TSS/h (IF ~0.45),
+    because (HR/LTHR)² ignores resting HR and would score a walk about twice that just for wearing a watch."""
+    secs = a["moving_time"] or 0
+    if sports.kind(a["sport_type"]) == "walk":
+        return metrics.estimate_tss(secs, 20), None, "estimate"
+    if a.get("avg_hr"):
+        tss, intensity = metrics.tss_from_hr(secs, a["avg_hr"], cfg.run_threshold_hr)
+        return tss, intensity, "rhr"
+    pace = threshold_pace_at(acts, date.fromisoformat(a["start_date_local"][:10]), cfg)
+    if pace and a.get("avg_speed"):
+        tss, intensity = metrics.tss_from_pace(secs, a["avg_speed"], pace)
+        return tss, intensity, "rpace"
+    return metrics.estimate_tss(secs, 55), None, "estimate"  # an easy run, ~IF 0.75
 
 
 def recompute(db: DB, cfg: Config) -> None:
     """Assign FTP/TSS/IF to every activity. Cheap enough to run after each sync."""
     acts = db.activities()
     for a in acts:
+        if not sports.is_ride(a):
+            tss, intensity, src = run_load(a, acts, cfg)
+            db.update_activity(a["id"], ftp_used=None, tss=round(tss, 1),
+                               intensity=round(intensity, 3) if intensity else None, tss_source=src)
+            continue
         day = date.fromisoformat(a["start_date_local"][:10])
         ftp, _ = ftp_at(acts, day, cfg.ftp_override, cfg.ftp_tests)
         secs = a["moving_time"] or 0

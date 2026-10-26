@@ -33,12 +33,16 @@ RENEW_BEFORE = 3600       # mint a new token this long before the old one runs o
 PAGE = 100
 HEALTH_DAYS_PER_CALL = 28  # sleep allows 31 days per call, steps 28: stay under both
 
-# Garmin's cycling activity types → the Strava sport types the rest of the app uses. E-bikes keep Strava's e-bike types,
+# Garmin's activity types → the Strava sport types the rest of the app uses. E-bikes keep Strava's e-bike types,
 # which RIDE_TYPES leaves out like on Strava (motor-assisted load isn't the athlete's); hand cycling and BMX aren't mapped.
 SPORT_TYPES = {"road_biking": "Ride", "cycling": "Ride", "gravel_cycling": "GravelRide", "mountain_biking": "MountainBikeRide",
                "cyclocross": "Ride", "track_cycling": "Ride", "indoor_cycling": "Ride", "virtual_ride": "VirtualRide",
-               "recumbent_cycling": "Ride", "e_bike_fitness": "EBikeRide", "e_bike_mountain": "EMountainBikeRide"}
-INDOOR = {"indoor_cycling", "virtual_ride"}
+               "recumbent_cycling": "Ride", "e_bike_fitness": "EBikeRide", "e_bike_mountain": "EMountainBikeRide",
+               # Runs and walks (0.11.0): a treadmill run is Strava's Run on a trainer
+               "running": "Run", "street_running": "Run", "track_running": "Run", "treadmill_running": "Run",
+               "indoor_running": "Run", "trail_running": "TrailRun", "virtual_run": "VirtualRun",
+               "walking": "Walk", "casual_walking": "Walk", "speed_walking": "Walk", "hiking": "Hike"}
+INDOOR = {"indoor_cycling", "virtual_ride", "treadmill_running", "indoor_running", "virtual_run"}
 
 
 class GarminError(Exception):
@@ -110,7 +114,7 @@ class GarminClient:
         start = (datetime.fromtimestamp(after_epoch, timezone.utc) - timedelta(days=1)).date().isoformat()
         out, offset = [], 0
         while True:
-            # No activityType filter: the sports the app handles are whatever SPORT_TYPES maps (running joins it later)
+            # No activityType filter: the sports the app handles are whatever SPORT_TYPES maps
             r = await self._get("/activitylist-service/activities/search/activities",
                                 startDate=start, start=offset, limit=PAGE, sortOrder="asc")
             page = _json(r, [])

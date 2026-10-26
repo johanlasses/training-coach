@@ -15,7 +15,7 @@ pytestmark = pytest.mark.real_checkin
 
 TODAY = date(2026, 10, 15)  # Thursday
 WS = stats.week_start(TODAY)
-CFG = Config(anthropic_api_key="k", default_coach="carmichael")
+CFG = Config(anthropic_api_key="k", cycling_coach="carmichael")
 
 
 def ride(db, i, when: date, minutes=60, name="Ride"):

@@ -6,8 +6,8 @@ import math
 import re
 from datetime import date, timedelta
 
-from . import health, metrics, stats
-from .coach import compliance
+from . import health, metrics, sports, stats
+from .coach import compliance, counts_for
 from .config import Config
 from .db import DB
 from .sync import ftp_at
@@ -33,8 +33,10 @@ def _norm(s: str) -> str:
 
 
 def rides_for(session: dict, sessions: list[dict], acts: list[dict]) -> list[dict]:
-    """The rides that were this session: those named after it (Zwift names the ride after the workout, and the
-    athlete swaps days), else that day's rides that aren't named after another session."""
+    """The activities that were this session: those named after it (Zwift names the ride after the workout, and the
+    athlete swaps days), else that day's activities that aren't named after another session. Only activities that can
+    be this session count: a ride for a ride, a run for a run, a long walk for an easy one (coach.counts_for)."""
+    acts = [a for a in acts if counts_for(session, a)]
     named = [a for a in acts if _norm(session["title"]) and _norm(session["title"]) in _norm(a["name"] or "")]
     if named:
         return named
@@ -53,11 +55,20 @@ def day_statuses(plan: dict, acts: list[dict], upto: str) -> list[tuple[dict, st
             for d in days if d["date"] <= upto]
 
 
-def today_session(db: DB, today: date) -> dict | None:
+def today_sessions(db: DB, today: date) -> list[dict]:
+    """Today's sessions, primary sport first (a day may hold a ride and a run)."""
     plan = db.active_plan(stats.week_start(today).isoformat())
-    if not plan:
-        return None
-    return next((d for d in plan["payload"]["days"] if d["date"] == today.isoformat() and d["kind"] != "rest"), None)
+    return [d for d in (plan or {}).get("payload", {}).get("days", []) if d["date"] == today.isoformat() and d["kind"] != "rest"]
+
+
+def today_session(db: DB, today: date) -> dict | None:
+    """Today's session; with two, one standing for both (titles and minutes joined) for the sensor and the
+    morning notification."""
+    s = today_sessions(db, today)
+    if len(s) < 2:
+        return s[0] if s else None
+    return s[0] | {"title": " + ".join(d["title"] for d in s), "duration_min": sum(d["duration_min"] for d in s),
+                   "description": " ".join(f"{sports.SPORTS[sports.day_sport(d)]}: {first_sentence(d['description'])}" for d in s)}
 
 
 def week(db: DB, acts: list[dict], today: date) -> dict:
@@ -69,14 +80,14 @@ def week(db: DB, acts: list[dict], today: date) -> dict:
     week_acts = [a for a in acts if a["start_date_local"][:10] >= ws.isoformat()]
     days = plan["payload"]["days"]
     sessions = [d for d in days if d["kind"] != "rest"]
-    status = {d["date"]: compliance(d, rides_for(d, sessions, week_acts)) for d in sessions}
-    done = sum(1 for d in sessions if status[d["date"]] == "done")
+    status = {sports.day_key(d): compliance(d, rides_for(d, sessions, week_acts)) for d in sessions}
+    done = sum(1 for d in sessions if status[sports.day_key(d)] == "done")
     # Today's session is next until it's ridden
     nxt = next((d for d in sessions if d["date"] > today.isoformat()
-                or (d["date"] == today.isoformat() and status[d["date"]] == "missed")), None)
+                or (d["date"] == today.isoformat() and status[sports.day_key(d)] == "missed")), None)
     return {"plan": True, "plan_week": ws.isoformat(), "sessions": len(sessions), "done": done,
-            "partial": sum(1 for d in sessions if status[d["date"]] == "partial"),
-            "missed": sum(1 for d in sessions if d["date"] < today.isoformat() and status[d["date"]] == "missed"),
+            "partial": sum(1 for d in sessions if status[sports.day_key(d)] == "partial"),
+            "missed": sum(1 for d in sessions if d["date"] < today.isoformat() and status[sports.day_key(d)] == "missed"),
             "tss_done": done_tss, "tss_planned": sum(d["target_tss"] for d in days),
             # Today's session counts once today has a ride, so the morning doesn't look behind
             "tss_planned_to_date": sum(d["target_tss"] for d in days if d["date"] < today.isoformat() or (

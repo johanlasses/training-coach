@@ -193,14 +193,14 @@ def test_plan_button_and_auto_plan_reach_generate_plan(client, monkeypatch):
     monkeypatch.setattr(main.ha, "notify", noop)
     jobs = []
     monkeypatch.setattr(st, "start_job", lambda name, coro: jobs.append(coro) or True)
-    st.cfg.default_coach = "carmichael"
+    st.cfg.cycling_coach = "carmichael"
     ws = main.stats.week_start(main.date.today())
     r = client.post(f"/plan?week={ws}", data={"coach": "pogacar"}, follow_redirects=False)  # a stale form field
     assert r.status_code == 303
     asyncio.run(jobs[0])
     asyncio.run(st.do_auto_plan(main.date(2026, 10, 26)))
-    # Both plan with the athlete's coach from Profile, whatever the form says
-    assert calls == [(ws, "carmichael"), (main.date(2026, 10, 26), "carmichael")]
+    # Both plan with the athlete's coaches from Profile (no override), whatever the form says
+    assert calls == [(ws, None), (main.date(2026, 10, 26), None)]
 
 
 def test_usage_cost_uses_each_models_price(tmp_path):

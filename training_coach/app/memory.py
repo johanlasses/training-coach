@@ -4,14 +4,18 @@ from __future__ import annotations
 
 from datetime import date, datetime, timedelta
 
-from . import coaches
+from . import coaches, sports
 from .config import LEVELS, Config
 from .db import DB
 from .stats import week_start
 
 # Profile fields whose changes are logged, with their label
+COACH_FIELDS = {"cycling_coach": "cycling", "running_coach": "running"}
 TRACKED = {
-    "goals": "Goals", "default_coach": "Coach", "athlete_level": "Level", "sessions_per_week": "Sessions per week",
+    "goals": "Goals", "cycling_coach": "Cycling coach", "running_coach": "Running coach", "primary_sport": "Primary sport",
+    "cycling_active": "Cycling", "cycling_until": "Cycling active until", "running_active": "Running",
+    "running_until": "Running active until", "run_lthr": "Running threshold HR", "threshold_pace": "Threshold pace",
+    "athlete_level": "Level", "sessions_per_week": "Sessions per week",
     "weight_kg": "Weight", "ftp_override": "FTP override", "lthr": "Threshold HR", "available_days": "Training days",
     "max_weekday_minutes": "Max minutes on weekdays", "max_weekend_minutes": "Max minutes on weekends",
 }
@@ -25,13 +29,23 @@ def tracked(cfg: Config) -> dict:
 def _show(name: str, v) -> str:
     if name == "goals":
         return f"“{v[:300]}{'…' if len(v) > 300 else ''}”" if v else "none"
-    if name == "default_coach":
+    if name in COACH_FIELDS:
         return coaches.name_of(v)
+    if name in ("cycling_active", "running_active"):
+        return "active" if v else "on hold"
+    if name in ("cycling_until", "running_until"):
+        return v or "no end date"
+    if name == "primary_sport":
+        return sports.SPORTS.get(v, v)
+    if name == "threshold_pace":
+        return f"{v // 60}:{v % 60:02d}/km" if v else "estimated"
+    if name == "run_lthr" and not v:
+        return "same as cycling"
     if name == "athlete_level":
         return LEVELS.get(v, (v,))[0]
     if name == "available_days":
         return ", ".join(d.capitalize() for d in v) or "none"
-    unit = {"weight_kg": " kg", "ftp_override": " W", "lthr": " bpm"}.get(name, "")
+    unit = {"weight_kg": " kg", "ftp_override": " W", "lthr": " bpm", "run_lthr": " bpm"}.get(name, "")
     return "auto" if name == "ftp_override" and not v else f"{v:g}{unit}" if isinstance(v, float) else f"{v}{unit}"
 
 
@@ -43,22 +57,46 @@ def log_changes(db: DB, before: dict, cfg: Config, ts: str) -> list[str]:
         if old == new:
             continue
         text = f"{label}: {_show(name, old)} → {_show(name, new)}"
-        if name == "default_coach":
-            db.log(ts, "coach", text, {"from": old, "to": new})
+        if name in COACH_FIELDS:
+            db.log(ts, "coach", text, {"from": old, "to": new, "sport": COACH_FIELDS[name]})
         else:
             db.log(ts, "profile", text, {"field": name, "old": old, "new": new})
         out.append(text)
     return out
 
 
-def coach_in_charge(db: DB, cfg: Config, when: datetime) -> coaches.Coach:
-    """The coach of that week's active plan, unless the athlete switched coach on Profile after the plan was made.
-    The latest decision wins: a plan made after the switch, with any coach, takes over again."""
+def plan_coach(plan: dict | None, sport: str = "cycling") -> str | None:
+    """Who planned a sport's sessions in a plan: the days' coach; plans from before 0.11.0 are all cycling, by the
+    plan's coach."""
+    if not plan:
+        return None
+    own = coaches.COACHES.get(plan["coach"] or "")
+    if own and own.sport == sport:  # the plan's coach; a chat revision by a new coach only stamps the days it changed
+        return plan["coach"]
+    keys = [d["coach"] for d in plan["payload"]["days"] if d.get("coach") and sports.day_sport(d) == sport]
+    if keys:
+        return keys[0]
+    return plan["coach"] if sport == "cycling" and not any(d.get("sport") for d in plan["payload"]["days"]) else None
+
+
+def last_switch(db: DB, when: datetime, sport: str) -> dict | None:
+    """The latest coach switch for a sport on Profile (logs from before 0.11.0 have no sport: cycling)."""
+    entries = [e for e in db.log_entries(limit=200) if e["kind"] == "coach" and e["ts"] <= when.isoformat(timespec="seconds")
+               and e["data"].get("sport", "cycling") == sport]
+    return entries[0] if entries else None
+
+
+def coach_in_charge(db: DB, cfg: Config, when: datetime, sport: str | None = None) -> coaches.Coach:
+    """A sport's coach (default: the primary sport's): the coach of that week's plan for it, unless the athlete
+    switched that sport's coach on Profile after the plan was made. The latest decision wins: a plan made after the
+    switch, with any coach, takes over again."""
+    sport = sport or cfg.active_sports(when.date())[0]
     plan = db.active_plan(week_start(when.date()).isoformat())
-    switch = db.last_log("coach", when.isoformat(timespec="seconds"))
-    if plan and plan["coach"] and not (switch and switch["ts"] > made(db, plan)):
-        return coaches.get(plan["coach"])
-    return coaches.get(switch["data"]["to"] if switch else cfg.default_coach)
+    planned = plan_coach(plan, sport)
+    switch = last_switch(db, when, sport)
+    if planned and not (switch and switch["ts"] > made(db, plan)):
+        return coaches.get(planned, sport)
+    return coaches.get(switch["data"]["to"] if switch else cfg.coach_key(sport), sport)
 
 
 def made(db: DB, plan: dict) -> str:
@@ -86,8 +124,17 @@ def _past_note(n: dict) -> dict:
 
 
 def coach_timeline(db: DB, cfg: Config, when: datetime, weeks: int = 52) -> list[dict]:
-    """Who coached the athlete, oldest first: runs of weeks whose active plan came from one coach. A switch on
-    Profile that no plan reflects yet starts a run on the switch date. The current run has no end."""
+    """Who coached the athlete, oldest first: runs of weeks whose active plan came from one coach, per sport (running
+    entries say so). A switch on Profile that no plan reflects yet starts a run on the switch date. The current run
+    has no end."""
+    out = sport_timeline(db, cfg, when, "cycling", weeks)
+    running = sport_timeline(db, cfg, when, "running", weeks)
+    if running and (cfg.sport_on("running", when.date()) or any(r["weeks_planned"] for r in running)):
+        out = sorted(out + [r | {"sport": "running"} for r in running], key=lambda r: r["from"])
+    return out
+
+
+def sport_timeline(db: DB, cfg: Config, when: datetime, sport: str, weeks: int = 52) -> list[dict]:
     this_week = week_start(when.date())
     runs = []
     for n in range(weeks, -1, -1):
@@ -95,12 +142,15 @@ def coach_timeline(db: DB, cfg: Config, when: datetime, weeks: int = 52) -> list
         plan = db.active_plan(ws.isoformat())
         if not plan:
             continue
-        if runs and runs[-1]["key"] == plan["coach"]:
+        key = plan_coach(plan, sport)
+        if key is None and (sport == "running" or any(d.get("sport") for d in plan["payload"]["days"])):
+            continue  # no sessions of this sport that week (a None key on an old plan is a coach from before coaches)
+        if runs and runs[-1]["key"] == key:
             runs[-1].update(to=ws + timedelta(days=6), weeks=runs[-1]["weeks"] + 1)
         else:
-            runs.append({"key": plan["coach"], "from": ws, "to": ws + timedelta(days=6), "weeks": 1})
-    current = coach_in_charge(db, cfg, when)
-    switch = db.last_log("coach", when.isoformat(timespec="seconds"))
+            runs.append({"key": key, "from": ws, "to": ws + timedelta(days=6), "weeks": 1})
+    current = coach_in_charge(db, cfg, when, sport)
+    switch = last_switch(db, when, sport)
     if switch and (not runs or runs[-1]["key"] != current.key):
         since = date.fromisoformat(switch["ts"][:10])
         if runs:

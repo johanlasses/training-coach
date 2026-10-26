@@ -84,14 +84,14 @@ def test_profile_save_keeps_secrets_and_recomputes(client):
 
 def test_goals_level_sessions_and_coach(client):
     r = client.post("/profile", data={"goals": "  Climb faster  ", "athlete_level": "advanced",
-                                      "sessions_per_week": "4", "default_coach": "pogacar"})
+                                      "sessions_per_week": "4", "cycling_coach": "pogacar"})
     assert "Profile saved." in r.text
     cfg = load_config(main.app.state.st.db)
-    assert (cfg.goals, cfg.athlete_level, cfg.sessions_per_week, cfg.default_coach) == ("Climb faster", "advanced", 4, "pogacar")
-    r = client.post("/profile", data={"athlete_level": "pro", "default_coach": "lance"})
+    assert (cfg.goals, cfg.athlete_level, cfg.sessions_per_week, cfg.cycling_coach) == ("Climb faster", "advanced", 4, "pogacar")
+    r = client.post("/profile", data={"athlete_level": "pro", "cycling_coach": "lance"})
     assert "is not a valid choice" in r.text
     cfg = load_config(main.app.state.st.db)
-    assert cfg.athlete_level == "advanced" and cfg.default_coach == "pogacar"
+    assert cfg.athlete_level == "advanced" and cfg.cycling_coach == "pogacar"
     html = client.get("/profile").text
     assert 'value="pogacar" checked' in html and "Climb faster" in html
 
@@ -105,7 +105,7 @@ def test_plan_page_shows_the_athletes_coach(client):
     html = client.get("/plan").text
     assert "Base" in html and "Planned by Pogačar" in html and "Plan with Next Level" in html
     assert 'class="tabs"' not in html and "?coach=" not in html  # no coach tabs any more
-    st.cfg.default_coach = "carmichael"
+    st.cfg.cycling_coach = "carmichael"
     second = db.save_plan(ws, "t2", "m", {"week_focus": "Crunch", "rationale": "", "block_week": 1, "days": []}, [], "carmichael")
     html = client.get("/plan").text  # switching coach on Profile shows that coach's plan
     assert "Crunch" in html and "Re-plan remaining days" in html and "Planned by" not in html
@@ -175,7 +175,7 @@ def test_a_past_week_cant_be_planned_again(client, monkeypatch):
     today = main.date.today()
     last = main.stats.week_start(today) - main.timedelta(days=7)
     st.db.save_plan(last.isoformat(), "t", "m", {"week_focus": "Done", "rationale": "", "block_week": 1, "days": []}, [],
-                    main.coaches.get(st.cfg.default_coach).key)
+                    main.coaches.get(st.cfg.cycling_coach).key)
     html = client.get(f"/plan?week={last}").text
     assert "Done" in html and "Re-plan remaining days" not in html and f'action="/plan?week={last}"' not in html
     assert "Re-plan" not in client.get(f"/plan?week={last + main.timedelta(days=7)}").text  # this week: no plan yet

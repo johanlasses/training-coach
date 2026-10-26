@@ -15,6 +15,9 @@ DEFAULT_RULES = {
     "max_hard_sessions": {"beginner": 2, "intermediate": 2, "advanced": 2, "elite": 2},  # per week, by level
     "density_weeks": None,              # after this many weeks with the coach, cap hard sessions at 2
 }
+# Running: impact load recovers slower than cycling, so fewer hard runs, and none for a beginner's first weeks is
+# the coach's call (philosophy), not a cap. The run durability guard (coach.run_errors) caps volume on top.
+RUN_RULES = DEFAULT_RULES | {"max_hard_sessions": {"beginner": 1, "intermediate": 2, "advanced": 2, "elite": 3}}
 
 
 @dataclass(frozen=True)
@@ -26,10 +29,11 @@ class Coach:
     overrides: dict = field(default_factory=dict)
     cheers: tuple[str, ...] = ()        # rotated through interval reps in Zwift, in the coach's voice
     last_rep: str = "Last one"
+    sport: str = "cycling"              # cycling | running (sports.SPORTS)
 
     def rules(self, level: str = "intermediate", weeks_with_coach: int = 0) -> dict:
         """Concrete limits for this athlete: {"max_consecutive_hard": int, "max_hard_sessions": int}."""
-        r = DEFAULT_RULES | self.overrides
+        r = (RUN_RULES if self.sport == "running" else DEFAULT_RULES) | self.overrides
         max_hard = r["max_hard_sessions"].get(level, 2)
         if r["density_weeks"] and weeks_with_coach >= r["density_weeks"]:
             max_hard = min(max_hard, 2)
@@ -65,11 +69,26 @@ COACHES = {c.key: c for c in [
                   "Halfway or not, same power and cadence as rep one",
                   "Pace it, don't race it"),
           last_rep="Final rep, finish it well"),
+    Coach("almgren", "Almgren (double threshold)", "Almgren",
+          "Easy running, controlled threshold work, hills and strides; double threshold only above ~75 km a week.",
+          {"max_hard_sessions": {"beginner": 1, "intermediate": 2, "advanced": 3, "elite": 3}}, sport="running"),
+    Coach("runnextlevel", "Next Level Run", "Next Level Run",
+          "80/20 running around work and family: one or two quality runs, a growing long run, deloads and strength.",
+          sport="running"),
 ]}
+DEFAULTS = {"cycling": "nextlevel", "running": "runnextlevel"}
 
 
-def get(key: str | None) -> Coach:
-    return COACHES.get(key or "", COACHES["nextlevel"])
+def get(key: str | None, sport: str | None = None) -> Coach:
+    """The coach by key; an unknown key (or one from the other sport) falls back to that sport's default."""
+    c = COACHES.get(key or "")
+    if c and (sport is None or c.sport == sport):
+        return c
+    return COACHES[DEFAULTS[sport or "cycling"]]
+
+
+def for_sport(sport: str) -> list[Coach]:
+    return [c for c in COACHES.values() if c.sport == sport]
 
 
 def name_of(key: str | None) -> str:
