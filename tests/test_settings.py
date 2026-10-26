@@ -168,3 +168,22 @@ def test_external_urls_default_to_the_real_services():
     out = subprocess.run([sys.executable, "-c", code], cwd="training_coach", env=env, capture_output=True, text=True, check=True).stdout.split()
     assert out[:3] == ["https://www.strava.com/api/v3", "https://www.strava.com/oauth/token", "https://us-or-rly101.zwift.com/api"]
     assert out[3].startswith("https://secure.zwift.com/")
+
+
+def test_a_past_week_cant_be_planned_again(client, monkeypatch):
+    st = main.app.state.st
+    today = main.date.today()
+    last = main.stats.week_start(today) - main.timedelta(days=7)
+    st.db.save_plan(last.isoformat(), "t", "m", {"week_focus": "Done", "rationale": "", "block_week": 1, "days": []}, [],
+                    main.coaches.get(st.cfg.default_coach).key)
+    html = client.get(f"/plan?week={last}").text
+    assert "Done" in html and "Re-plan remaining days" not in html and f'action="/plan?week={last}"' not in html
+    assert "Re-plan" not in client.get(f"/plan?week={last + main.timedelta(days=7)}").text  # this week: no plan yet
+    html = client.get(f"/plan?week={last - main.timedelta(days=7)}").text  # two weeks back, no plan
+    assert "No plan was made for this week" in html and "plans from today" not in html and "Plan with" not in html
+    jobs = []
+    monkeypatch.setattr(st, "start_job", lambda name, coro: jobs.append(coro.close()) or True)
+    r = client.post(f"/plan?week={last}")
+    assert not jobs and "That week is over" in r.text
+    client.post(f"/plan?week={main.stats.week_start(today)}")
+    assert jobs  # the current week still plans

@@ -9,11 +9,13 @@
     <h2>Week of {{ week.strftime('%-d %b') }}</h2>
     <a class="btn secondary" href="{{ base }}/plan?week={{ next.isoformat() }}" aria-label="Next week">→</a>
   </div>
+  {% if not past %}{#- a week that's over has nothing left to plan -#}
   <form method="post" action="{{ base }}/plan?week={{ week.isoformat() }}" class="plan-action">
     {% set planning = jobs.plan and jobs.plan.running %}
     <button {{ 'disabled' if not ai_ok or planning or needs_profile }}>
       {% if planning %}{{ coach | coach_short }} is planning…{% elif plan and plan.coach == coach %}Re-plan remaining days{% else %}Plan with {{ coach | coach_short }}{% endif %}</button>
   </form>
+  {% endif %}
 </div>
 {% if needs_profile %}<div class="notice">Welcome! <a href="{{ base }}/profile">Fill in your Profile</a> first: your training days, hours per
   session and goals. The coach plans around them.</div>{% endif %}
@@ -108,7 +110,7 @@
 {% endfor %}
 </div>
 {% else %}
-<div class="card"><p class="flush">No plan for this week yet.
-  {% if ai_ok %}{{ coach | coach_name }} plans from today through Sunday from your goals, load, power curve, the season and your availability.{% endif %}</p></div>
+<div class="card"><p class="flush">{% if past %}No plan was made for this week.{% else %}No plan for this week yet.
+  {% if ai_ok %}{{ coach | coach_name }} plans from today through Sunday from your goals, load, power curve, the season and your availability.{% endif %}{% endif %}</p></div>
 {% endif %}
 {% endblock %}

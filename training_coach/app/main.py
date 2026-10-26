@@ -651,7 +651,7 @@ async def plan_view(request: Request, week: str | None = None):
                   active_id=active["id"] if active else None, week=ws, prev=ws - timedelta(days=7),
                   next=ws + timedelta(days=7), today=today.isoformat(), status=status, by_day=by_day, tests=tests,
                   applied_tests={t["date"] for t in st.cfg.ftp_tests}, needs_profile=needs_profile(st),
-                  uploads=st.db.get(f"{st.cfg.workout_app}_uploads") or {})
+                  uploads=st.db.get(f"{st.cfg.workout_app}_uploads") or {}, past=ws + timedelta(days=6) < today)
 
 
 def zwift_day(st: State, plan_id: int, day: str) -> tuple[dict, dict, str]:
@@ -741,6 +741,9 @@ async def plan_now(request: Request, week: str | None = None):
     ws = date.fromisoformat(week) if week else stats.week_start(date.today())
     if needs_profile(st):
         st.flash = ("error", "Fill in your Profile first: the coach plans around your days, hours and goals.")
+        return back(request, f"/plan?week={ws.isoformat()}")
+    if ws + timedelta(days=6) < date.today():  # nothing left to plan; a stale page mustn't rewrite history
+        st.flash = ("error", "That week is over: there's nothing left to plan.")
         return back(request, f"/plan?week={ws.isoformat()}")
     st.start_job("plan", st.do_plan(ws, coaches.get(st.cfg.default_coach).key, activate=True))  # the athlete's coach plans
     return back(request, f"/plan?week={ws.isoformat()}")

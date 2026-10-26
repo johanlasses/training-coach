@@ -90,17 +90,16 @@ form { margin: 0; }
 .layout { display: grid; grid-template-columns: minmax(0, 1fr) 420px; gap: 24px; }
 .layout-aside { grid-template-columns: minmax(0, 1fr) 240px; }
 @media (max-width: 1000px) { .layout, .layout-aside { grid-template-columns: 1fr; } }
-.page-head { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 16px; }
-.page-head h2 { margin: 0; font-size: 18px; }
-.page-head form { margin-left: auto; }
 .one-line { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-/* Plan: the week on one row (arrows at the ends), the plan button beside it, or full width below it on a phone */
+/* Plan and Analysis: the week (arrows at the ends) or the title on one row, the button beside it, or full width below it on a phone */
 .plan-head { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 16px; }
 .week-nav { display: flex; align-items: center; gap: 8px; flex: 1 1 260px; max-width: 420px; }
 .week-nav h2 { margin: 0; font-size: 18px; flex: 1; text-align: center; white-space: nowrap; }
+.head-title { flex: 1 1 260px; max-width: 420px; text-align: center; min-width: 0; }
+.head-title h2 { margin: 0; font-size: 18px; }
 .plan-action { margin-left: auto; }
 @media (max-width: 600px) {
-  .week-nav { max-width: none; }
+  .week-nav, .head-title { max-width: none; }
   .plan-action, .plan-action button { width: 100%; margin-left: 0; }
 }
 

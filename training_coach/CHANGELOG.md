@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.10.4 (2026-10-26)
+
+- **No re-planning a week that's over.** A past week on the Plan page has no plan button any more; there's nothing
+  left to plan.
+- **Analysis looks like Plan.** The title is centred with the date and coach under it, and on a phone the Analyse
+  button spans the full width.
+
 ## 0.10.3 (2026-10-26)
 
 - **Easy to find in MyWhoosh.** A session sent to MyWhoosh now goes on your MyWhoosh calendar at 20:00 on its day
