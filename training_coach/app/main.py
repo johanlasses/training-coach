@@ -664,13 +664,6 @@ def zwift_day(st: State, plan_id: int, day: str) -> tuple[dict, dict, str]:
     return plan, d, workouts.to_zwo(name, d["description"], d["steps"], c.cheers, c.last_rep)
 
 
-@app.get("/plan/{plan_id}/{day}.zwo")
-async def zwo(request: Request, plan_id: int, day: str):
-    _, d, xml = zwift_day(athlete(request), plan_id, day)
-    return Response(xml, media_type="application/xml",
-                    headers={"Content-Disposition": f'attachment; filename="{workouts.filename(day, d["title"])}"'})
-
-
 @app.post("/plan/{plan_id}/{day}/zwift")
 async def zwift_upload(request: Request, plan_id: int, day: str):
     st = athlete(request)

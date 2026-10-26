@@ -1,7 +1,7 @@
 # Training Coach
 
 A Home Assistant add-on (FastAPI + Jinja, served through HA ingress) for one road and gravel cyclist.
-It covers Strava sync, load metrics, a Claude-planned week with Zwift `.zwo` export, and a weekly AI analysis.
+It covers Strava/Garmin sync, load metrics, a Claude-planned week sent to Zwift or MyWhoosh, and a weekly AI analysis.
 See README.md for the architecture and `training_coach/DOCS.md` for the user-facing setup.
 
 ## Commands

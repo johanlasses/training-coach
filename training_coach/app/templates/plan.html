@@ -90,16 +90,17 @@
     </div>
     <div>
       {% if d.kind == 'zwift' %}{#- an indoor session; "zwift" is the plan's name for it, whichever app rides it -#}
+        {#- Any day, past ones too: a missed session can be ridden later -#}
         {% set sent = uploads.get(plan.id ~ '/' ~ dd) %}
-        {% if workout_app_ok and dd >= today %}
+        {#- Past and done days get the quiet style: scrolling back mustn't be a wall of orange buttons -#}
+        {% set quiet = sent or dd < today or status[dd] == 'done' %}
+        {% if workout_app_ok %}
         <form method="post" action="{{ base }}/plan/{{ plan.id }}/{{ dd }}/{{ workout_app }}" class="zwift-send">
-          <button class="{{ 'secondary' if sent }}">{{ 'Send again' if sent else 'Send to ' ~ workout_app_name }}</button></form>
+          <button class="{{ 'secondary' if quiet }}">{{ 'Send again' if sent else 'Send to ' ~ workout_app_name }}</button></form>
         {% if sent %}<p class="facts">✓ In {{ workout_app_name }} since {{ sent | replace('T', ' ') }}</p>{% endif %}
-        <a class="btn secondary" href="{{ base }}/plan/{{ plan.id }}/{{ dd }}.zwo">Download .zwo</a>
         {% else %}
-        <a class="btn" href="{{ base }}/plan/{{ plan.id }}/{{ dd }}.zwo">Download .zwo</a>
-        <p class="facts">{% if workout_app == 'mywhoosh' %}Import it in MyWhoosh's workout builder{% else %}Save it in Zwift's Workouts folder{% endif %}{% if not workout_app_ok %},
-          or <a href="{{ base }}/profile#conn-{{ workout_app }}">connect {{ workout_app_name }}</a> to send it directly{% endif %}.</p>
+        <a class="btn{{ ' secondary' if quiet }}" href="{{ base }}/profile#conn-{{ workout_app }}">Connect {{ workout_app_name }}</a>
+        <p class="facts">Then this session can be sent to {{ workout_app_name }}.</p>
         {% endif %}
       {% endif %}
     </div>

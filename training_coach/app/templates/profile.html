@@ -118,8 +118,8 @@
 
 <section class="card">
   <h2>Indoor app</h2>
-  <p class="caption">Where the coach's indoor sessions go, with the coach's on-screen messages. The <b>.zwo</b> download
-    on the Plan page works for both.</p>
+  <p class="caption">Where the coach's indoor sessions go, with the coach's on-screen messages: <b>Send to …</b> on the
+    Plan page, for upcoming and past sessions.</p>
   <form method="post" action="{{ base }}/profile/indoor">
     {{ pick('workout_app', 'zwift', 'Zwift', 'Sent to Custom Workouts; restart Zwift to see them.', cfg.workout_app, 'conn-zwift') }}
     {{ pick('workout_app', 'mywhoosh', 'MyWhoosh', 'The free alternative: sent to My Workouts in MyWhoosh.', cfg.workout_app, 'conn-mywhoosh') }}

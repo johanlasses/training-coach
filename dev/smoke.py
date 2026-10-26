@@ -338,7 +338,7 @@ def zwift() -> None:
         print("  skip Send to Zwift: the latest plan has no Zwift day (single remaining day was a rest day)")
         return
     z = web.get(f"/plan/{plan['id']}/{day['date']}.zwo")
-    check(z.status_code == 200 and "<workout_file>" in z.text, ".zwo export is valid XML with a workout_file")
+    check(z.status_code == 404 and ".zwo" not in page("/plan"), "no .zwo download any more, only Send (0.10.2)")
     r = post(f"/plan/{plan['id']}/{day['date']}/zwift")
     files = httpx.get(f"{ZWIFT}/_dev/files").json()
     check(any(k.endswith(".zwo") for k in files) and "workouts.files" in files, "workout and manifest reached the fake Zwift", str(list(files)))

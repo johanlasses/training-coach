@@ -1,7 +1,7 @@
 # Training Coach
 
 A Home Assistant add-on for road and gravel training. It pulls rides from Strava or Garmin Connect, shows a
-Strava-style feed with load and power statistics, and uses Claude to plan your week (Zwift workouts as `.zwo`, or
+Strava-style feed with load and power statistics, and uses Claude to plan your week (indoor workouts sent to Zwift or MyWhoosh, or
 outdoor rides when the season and daylight allow) and to write an in-depth analysis, with a choice of three coaching
 styles. You can chat with the coach to change the week, and it can use recovery data from Apple Health (through the
 Home Assistant iPhone app) or Garmin.

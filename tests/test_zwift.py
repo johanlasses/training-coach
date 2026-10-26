@@ -137,15 +137,28 @@ def client(tmp_path, monkeypatch):
 
 
 def test_plan_shows_send_button_only_when_connected(client):
-    week = f"/plan?week={client.day}&coach=carmichael"
+    week = f"/plan?week={client.day}"
     html = client.get(week).text
-    assert "Send to Zwift" not in html and "connect Zwift" in html
+    # Not connected: the button leads to Zwift's card on Profile. No .zwo download any more (0.10.2)
+    assert "Send to Zwift" not in html and 'href="/profile#conn-zwift">Connect Zwift' in html
+    assert ".zwo" not in html and client.get(f"/plan/{client.plan_id}/{client.day}.zwo").status_code == 404
     connected(client.st.db)
     assert f'action="/plan/{client.plan_id}/{client.day}/zwift"' in client.get(week).text
     client.st.db.set("zwift_profile", {"id": 42, "firstName": "Johan", "lastName": "L"})
     profile = client.get("/profile").text  # connections moved from Settings to Profile in 0.9.0
     assert "Connect Zwift" not in profile and "Connected as <b>Johan L</b>" in profile
     assert "Connect Zwift" not in client.get("/settings").text
+
+
+def test_a_past_session_can_be_sent_too(client):
+    """A missed session from last week can still be ridden: Send shows on past days as well."""
+    st = client.st
+    past = (date.today() - timedelta(days=8)).isoformat()
+    payload = st.db.plan(client.plan_id)["payload"]
+    payload["days"][0]["date"] = past
+    plan_id = st.db.save_plan(past, "2026-10-12T08:00:00", "m", payload, [], "carmichael")
+    connected(st.db)
+    assert f'action="/plan/{plan_id}/{past}/zwift"' in client.get(f"/plan?week={past}").text
 
 
 def test_upload_route_uses_coach_voice_and_records_it(client, monkeypatch):

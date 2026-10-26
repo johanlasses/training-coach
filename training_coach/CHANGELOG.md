@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.10.2 (2026-10-26)
+
+- **Send any indoor session, past ones too.** Every indoor session on the Plan page has **Send to Zwift** or **Send
+  to MyWhoosh**, including last week's, so a missed session can be ridden later.
+- **No more .zwo download.** It didn't work in the Home Assistant iPhone app (the screen went dark), and sending covers
+  both apps. Until your indoor app is connected, the button says **Connect Zwift** or **Connect MyWhoosh** and takes
+  you to its card on Profile.
+
 ## 0.10.1 (2026-10-26)
 
 - **Every connection on Profile, all the time.** Strava, Garmin Connect, Apple Health, Zwift and MyWhoosh each have
