@@ -129,7 +129,7 @@ def test_shared_claude_key_and_strava_app_never_saved_in_athletes_db(client):
     assert raw["anthropic_api_key"] == "" and raw["strava_client_id"] == "" and raw["strava_client_secret"] == ""
     assert anna.cfg.anthropic_api_key == "sk-owner"  # her attempt to set a key was ignored, the owner's still applies
     html = client.get("/settings", headers=as_user(ANNA, "Anna")).text
-    assert 'value="111"' not in html and "s Strava API app, so there" in html
+    assert 'value="111"' not in html and "s Strava API app. Connect" in html
     # Her own Strava app replaces the shared one
     client.post("/settings", headers=as_user(ANNA, "Anna"), data={"strava_client_id": "222", "strava_client_secret": "anna-secret"})
     assert load_config(anna.db).strava_client_id == "222" and anna.cfg.strava_client_secret == "anna-secret"

@@ -85,6 +85,16 @@ async def test_exchange_code_rejects_missing_scope_and_errors(db):
 
 
 @respx.mock
+async def test_exchange_code_says_when_the_strava_app_is_full(db):
+    # A new Strava API app connects only its owner: a second athlete gets a 403, and "connect again" won't help
+    respx.post(TOKEN_URL).mock(return_value=httpx.Response(403, json={
+        "message": "Limit of connected athletes exceeded", "errors": []}))
+    with pytest.raises(ValueError, match="limit of connected athletes.*your own free Strava API app"):
+        await StravaClient(db, "id", "s").exchange_code("http://localhost/strava-callback?code=x&scope=read,activity:read_all")
+    assert db.get("strava_token") is None
+
+
+@respx.mock
 async def test_stream_404_is_skipped_and_rides_still_scored(db):
     # Seen live in 0.4.0: a manual activity's streams 404'd, aborting every sync before recompute(), which left
     # streamed rides with ftp_used NULL and made the dashboard 500.

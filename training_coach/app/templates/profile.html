@@ -165,7 +165,9 @@
   {% else %}
   <ol class="steps-list">
     <li>
-      <p>Approve access on Strava. Tick every box.{% if shared_strava %} It goes through {{ owner_name }}'s Strava API app.{% endif %}</p>
+      <p>Approve access on Strava. Tick every box.{% if shared_strava %} It goes through {{ owner_name }}'s Strava API app.
+        Strava lets a new API app connect only a few athletes: if it says the limit is reached, create your own free app
+        and enter it under <a href="{{ base }}/settings">Settings → Strava API app</a>.{% endif %}</p>
       <a class="btn" href="{{ authorize_url }}" target="_blank" rel="noopener">Connect with Strava</a>
     </li>
     <li>

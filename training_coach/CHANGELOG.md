@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.11.1 (2026-10-26)
+
+- **A clear message when the Strava app is full.** Strava lets a new API app connect only its owner. A second athlete
+  signing in through it used to see "Codes are single-use — connect again", which never worked. Now they're told the
+  app has reached its athlete limit and to use a free Strava API app of their own (Settings → Strava API app) or
+  Garmin Connect.
+- **Warned up front.** Profile and Settings mention the limit before anyone hits it.
+
 ## 0.11.0 (2026-10-26)
 
 - **Running coaches.** Profile → Sports has Cycling and Running, each with its own coach, an Active/On hold switch

@@ -51,9 +51,10 @@
 <section class="card">
   <h2>Strava API app</h2>
   {% if shared_strava %}
-  <p class="caption">Your Strava sign-in goes through {{ owner_name }}'s Strava API app, so there's nothing to set up.
-    Connect your Strava account on <a href="{{ base }}/profile#conn-strava">Profile</a>.</p>
-  <details><summary class="muted">Use your own Strava API app instead (optional)</summary>
+  <p class="caption">Your Strava sign-in goes through {{ owner_name }}'s Strava API app. Connect your Strava account on
+    <a href="{{ base }}/profile#conn-strava">Profile</a>. Strava caps how many athletes one app can connect: if it says
+    the limit is reached, use an app of your own (below).</p>
+  <details><summary class="muted">Use your own Strava API app instead</summary>
   <p>Create one at <a href="https://www.strava.com/settings/api" target="_blank" rel="noopener">strava.com/settings/api</a>
     with <b>Authorization Callback Domain</b> <code>localhost</code>, then enter it here.</p>
   <form method="post" action="{{ base }}/settings">
@@ -66,7 +67,9 @@
   </details>
   {% else %}
   <p class="caption">Strava only lets apps sign people in through an API application of your own{% if is_owner %}. Every
-    athlete who picks Strava on Profile signs in through it{% endif %}. Create one at
+    athlete who picks Strava on Profile signs in through it, but a new Strava app connects only you until Strava
+    raises its athlete limit (their developer program review): until then, other athletes enter an app of their own
+    on their Settings{% endif %}. Create one at
     <a href="https://www.strava.com/settings/api" target="_blank" rel="noopener">strava.com/settings/api</a> and set
     <b>Authorization Callback Domain</b> to <code>localhost</code>. Any name, website and icon will do. Then connect
     your account on <a href="{{ base }}/profile#conn-strava">Profile</a>.</p>

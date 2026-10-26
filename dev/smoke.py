@@ -487,7 +487,7 @@ def multi_tenant() -> None:
           "dev2 gets an empty add-on of their own, none of the owner's rides")
     s2 = web2.get("/settings").text
     check("Claude (AI coach and analysis)" not in s2 and "Athletes" not in s2, "dev2 sees no Claude key or Athletes card")
-    check('value="12345"' not in s2 and "Strava API app, so there" in s2, "dev2 uses the owner's Strava app without seeing it")
+    check('value="12345"' not in s2 and "Strava API app. Connect" in s2, "dev2 uses the owner's Strava app without seeing it")
     check("notify.mobile_app_dev_iphone_2" in s2 and 'value="notify.mobile_app_dev_iphone"' not in s2,
           "dev2's notify list is only their own phone")
     r = web2.post("/settings", data={"_section": "schedules", "notify_service": NOTIFY})

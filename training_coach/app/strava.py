@@ -73,6 +73,10 @@ class StravaClient:
             "client_id": self.client_id, "client_secret": self.client_secret,
             "code": code, "grant_type": "authorization_code",
         })
+        if r.status_code == 403 and "limit" in r.text.lower():
+            # A new Strava API app connects 1 athlete (its owner) until Strava raises its capacity
+            raise ValueError("This Strava API app has reached its limit of connected athletes. Create your own free "
+                             "Strava API app and enter it under Settings → Strava API app, or use Garmin Connect.")
         if r.status_code >= 400:
             raise ValueError(f"Strava rejected the code ({r.status_code}). Codes are single-use — connect again.")
         data = r.json()
