@@ -1,6 +1,6 @@
 import pytest
 
-from app import checkin, garmin, ha
+from app import checkin, garmin, ha, mywhoosh
 
 
 @pytest.fixture(autouse=True)
@@ -12,6 +12,8 @@ def no_real_home_assistant(monkeypatch):
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
     # A Garmin call a test forgot to mock fails here instead of reaching Garmin (.invalid never resolves)
     monkeypatch.setattr(garmin, "BASE", "http://garmin.invalid")
+    for name in ("LOGIN_URL", "UPLOAD_URL", "TASK_URL"):  # likewise MyWhoosh
+        monkeypatch.setattr(mywhoosh, name, f"http://mywhoosh.invalid/{name.lower()}")
 
 
 @pytest.fixture(autouse=True)

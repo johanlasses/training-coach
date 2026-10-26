@@ -213,8 +213,10 @@ app is connected, the button says **Connect …** and takes you to its card.
 
 **Send to MyWhoosh.** Sign in on the **MyWhoosh** card with your MyWhoosh email and password, then pick MyWhoosh
 under **Indoor app**: a choice only becomes selectable once it's connected. The password is used once and not
-stored. The workout shows up in MyWhoosh under *My Workouts*, with power as a share of the FTP set in MyWhoosh.
-Sending a day again replaces that day's workout. MyWhoosh has no public API, so the add-on signs in like its app
+stored. The workout shows up in MyWhoosh under *My Workouts*, marked as a favourite, with power as a share of the FTP
+set in MyWhoosh. It also goes on your MyWhoosh calendar at 20:00 on its day (today, for a past session you're
+riding late), so you don't have to search for it. Sending a day again replaces that day's workout and its
+calendar entry. MyWhoosh has no public API, so the add-on signs in like its app
 does. Workouts sent this way can only be deleted in the MyWhoosh app, and MyWhoosh limits how many custom workouts
 you can have: if it's full, the button says so, and deleting a few old ones in the app makes room. If the login
 expires, Profile asks you to sign in again.

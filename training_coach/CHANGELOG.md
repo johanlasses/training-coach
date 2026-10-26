@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.10.3 (2026-10-26)
+
+- **Easy to find in MyWhoosh.** A session sent to MyWhoosh now goes on your MyWhoosh calendar at 20:00 on its day
+  (today, if it's a past session you're riding late), and is sent as a favourite. Sending the day again replaces the
+  calendar entry instead of adding another. If the calendar entry fails, the workout is still in My Workouts and the
+  Plan page says so.
+
 ## 0.10.2 (2026-10-26)
 
 - **Send any indoor session, past ones too.** Every indoor session on the Plan page has **Send to Zwift** or **Send

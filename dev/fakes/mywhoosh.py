@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import base64
+import itertools
 import json
 import time
 
@@ -39,6 +40,35 @@ async def upload(request: Request):
     return {"message": "Custom workout is being uploaded.", "status": True}
 
 
+tasks: dict[str, dict] = {}
+task_ids = itertools.count(1)  # never reused, like the real service
+
+
+@app.post("/v1/task/create")
+async def task_create(request: Request):
+    if request.headers.get("Authorization") != f"Bearer {TOKEN}":
+        return JSONResponse({"message": "Unauthorized"}, status_code=401)
+    body = await request.json()
+    if body.get("TaskType") != "E_Simple_Workout" or not body.get("TaskTypeId"):
+        return JSONResponse({"status": False, "message": "Invalid task"}, status_code=400)
+    task_id = f"task-{next(task_ids)}"
+    tasks[task_id] = {"workout": body["TaskTypeId"], "start": body["TaskStartedTimeEpoc"], "name": body.get("TaskName")}
+    return {"status": True, "data": {"TaskId": task_id}}
+
+
+@app.delete("/v1/task/{task_id}")
+def task_delete(task_id: str, request: Request):
+    if request.headers.get("Authorization") != f"Bearer {TOKEN}":
+        return JSONResponse({"message": "Unauthorized"}, status_code=401)
+    tasks.pop(task_id, None)
+    return {"status": True, "data": {"id": task_id}}
+
+
+@app.get("/_dev/tasks")
+def dev_tasks():
+    return tasks
+
+
 @app.get("/_dev/workouts")
 def dev_workouts():
     return {k: {"Name": w["Name"], "StepCount": w["StepCount"], "Time": w["Time"],
@@ -48,4 +78,5 @@ def dev_workouts():
 @app.post("/_dev/reset")
 def reset():
     workouts.clear()
+    tasks.clear()
     return {}

@@ -364,8 +364,11 @@ def mywhoosh() -> None:
         print("  skip Send to MyWhoosh: the latest plan has no indoor day")
     else:
         r = post(f"/plan/{plan['id']}/{day['date']}/mywhoosh")
-        check("is in MyWhoosh under My Workouts" in r.text, "Send to MyWhoosh reports success", notice(r))
+        check("on your calendar" in r.text and "at 20:00 and in My Workouts" in r.text,
+              "Send to MyWhoosh reports success, on the calendar too", notice(r))
         post(f"/plan/{plan['id']}/{day['date']}/mywhoosh")  # sending the day again replaces it
+        tasks = httpx.get(f"{MYWHOOSH}/_dev/tasks").json()
+        check(len(tasks) == 1, "one calendar entry per day, replaced on re-send (0.10.3)", str(tasks))
         got = httpx.get(f"{MYWHOOSH}/_dev/workouts").json()
         check(len(got) == 1 and next(iter(got.values()))["StepCount"] > 0, "the workout reached MyWhoosh once, re-sent in place",
               str(got))
@@ -509,11 +512,15 @@ def mobile() -> None:
 
 
 def main() -> None:
-    try:
-        httpx.get(f"{SUP}/_dev/push", timeout=3).raise_for_status()
-        web.get("/healthz").raise_for_status()
-    except httpx.HTTPError:
-        sys.exit("The dev stack isn't up. Run dev/devha.sh up first.")
+    for attempt in range(30):  # right after `devha.sh up`/`rebuild` the add-on takes a moment to answer
+        try:
+            httpx.get(f"{SUP}/_dev/push", timeout=3).raise_for_status()
+            web.get("/healthz").raise_for_status()
+            break
+        except httpx.HTTPError:
+            if attempt == 29:
+                sys.exit("The dev stack isn't up. Run dev/devha.sh up first.")
+            time.sleep(2)
     if "--keep" not in sys.argv:
         fresh_addon()
     reset_fakes()

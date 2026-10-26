@@ -14,6 +14,10 @@ MyWhoosh has no public API. This talks to the endpoints its apps use, as documen
   a backend bug, so a copy could only be removed in the app.)
 - "You don't have enough credit!" means the account has no room for more custom workouts: the athlete deletes some
   in the app.
+- Calendar: POST service14.mywhoosh.com/v1/task/create with TaskType E_Simple_Workout, TaskTypeId = the workout Id (a
+  string), start/end as epoch seconds; the reply carries data.TaskId, and DELETE /v1/task/<TaskId> removes it. Also
+  from the community client, and unverified against the real service like the favourite flag (IsFavorite on upload):
+  a refused favourite upload is retried without it.
 """
 from __future__ import annotations
 
@@ -24,7 +28,8 @@ import os
 import time
 import uuid
 import zlib
-from datetime import date
+from datetime import date, datetime, timedelta
+from datetime import time as clock
 
 import httpx
 
@@ -36,6 +41,8 @@ log = logging.getLogger(__name__)
 # TC_MYWHOOSH_* point the app at a fake MyWhoosh (dev/ stack); unset in production
 LOGIN_URL = os.environ.get("TC_MYWHOOSH_LOGIN_URL", "https://services.mywhoosh.com/http-service/api/login")
 UPLOAD_URL = os.environ.get("TC_MYWHOOSH_UPLOAD_URL", "https://coaching.mywhoosh.com/api/v2/client/custom-workout-upload")
+TASK_URL = os.environ.get("TC_MYWHOOSH_TASK_URL", "https://service14.mywhoosh.com/v1/task")  # the calendar
+CALENDAR_AT = clock(20, 0)  # when the session sits on MyWhoosh's calendar; the athlete rides it whenever
 HEADERS = {"Content-Type": "application/json", "User-Agent": "TrainingCoach/1.0 (Home Assistant add-on)"}
 ID_BASE = 9_000_000_000_000  # stable workout Ids, far from MyWhoosh's own timestamp-like Ids (see workout_id)
 TEST_ERG = "E_OFF"           # tests and free rides leave the resistance free; everything else is ERG
@@ -92,8 +99,17 @@ class MyWhooshClient:
         if not tok.get("access_token"):
             raise MyWhooshError("MyWhoosh is not connected — sign in on Profile")
         workout = to_workout(day, plan_day, name, cheers, last_rep, tok["whoosh_id"])
-        r = await self.http.post(UPLOAD_URL, headers={"Authorization": f"Bearer {tok['access_token']}"},
-                                 json={"UserId": tok["whoosh_id"], "SportsModeType": 0, "WorkoutsData": [workout]})
+
+        async def send(w: dict) -> httpx.Response:
+            return await self.http.post(UPLOAD_URL, headers={"Authorization": f"Bearer {tok['access_token']}"},
+                                        json={"UserId": tok["whoosh_id"], "SportsModeType": 0, "WorkoutsData": [w]})
+
+        r = await send(workout)
+        if r.status_code not in (200, 401) or _body(r).get("status") is False and "credit" not in r.text.lower():
+            # IsFavorite on upload is unverified: if MyWhoosh refuses the workout, send it again as before (0.10.2)
+            log.info("MyWhoosh refused the favourite upload (%s %s); sending without it", r.status_code, r.text[:200])
+            workout["IsFavorite"] = False
+            r = await send(workout)
         if r.status_code == 401:
             self.db.set("mywhoosh_token", tok | {"expires_at": 0})  # show as signed out
             raise MyWhooshError("The MyWhoosh login has expired — sign in again on Profile")
@@ -107,6 +123,43 @@ class MyWhooshClient:
                                     "(My Workouts), then send again")
             raise MyWhooshError(f"MyWhoosh refused the workout ({r.status_code}{': ' + message if message else ''})")
         return workout["Id"]
+
+    async def schedule(self, day: str, workout_id: int, name: str, seconds: int, tss: int,
+                       now: datetime | None = None) -> datetime:
+        """Puts the uploaded workout on MyWhoosh's calendar, so it's easy to find in the app: at 20:00 on its own day,
+        or today for a past session being ridden late, and never in the past (sent after 20:00: in five minutes).
+        The new entry is made first and the one this add-on made for that plan day before is removed after, so a
+        failure never leaves the day without one. Returns the local start time. Raises MyWhooshError; the workout
+        itself is uploaded either way."""
+        now = (now or datetime.now()).replace(second=0, microsecond=0)
+        tok = self.db.get("mywhoosh_token") or {}
+        headers = {"Authorization": f"Bearer {tok.get('access_token', '')}"}
+        tasks = self.db.get("mywhoosh_tasks") or {}
+        at = max(datetime.combine(max(date.fromisoformat(day), now.date()), CALENDAR_AT), now + timedelta(minutes=5))
+        start = int(at.astimezone().timestamp())  # epoch seconds, the container's (HA's) time zone
+        r = await self.http.post(f"{TASK_URL}/create", headers=headers, json={
+            "TaskId": "", "TaskType": "E_Simple_Workout", "TaskStartedTimeEpoc": start, "TaskTypeId": str(workout_id),
+            "CurDayId": "", "TaskState": "E_NotStarted", "DayNo": 0, "TaskEndEpochTime": start + seconds, "MapId": 0,
+            "TaskName": name[:60], "TaskDescription": "Training Coach", "TotalKilometers": 0, "TotalElevation": 0,
+            "TSS": tss or 0, "SportMode": "E_Cycling"})
+        data = _body(r)
+        inner = data.get("data") if isinstance(data.get("data"), dict) else {}
+        # The reply's shape is from the community client; accept the id where a variant would put it, and log the
+        # whole reply when it isn't found (the entry may exist anyway: then a re-send can't replace it)
+        task_id = next((src[k] for src in (inner, data) for k in ("TaskId", "taskId", "Id", "id") if src.get(k)), None)
+        if r.status_code >= 400 or data.get("status") is False or not task_id:
+            log.warning("MyWhoosh calendar entry failed: %s %s", r.status_code, r.text[:300])
+            raise MyWhooshError("it isn't on the MyWhoosh calendar")
+        self.db.set("mywhoosh_tasks", tasks | {day: str(task_id)})
+        if (old := tasks.get(day)) and old != str(task_id):
+            try:
+                d = await self.http.delete(f"{TASK_URL}/{old}", headers=headers)
+                if d.status_code >= 400:  # a stale entry is only clutter, but say so: re-sends would stack them
+                    log.warning("MyWhoosh calendar: removing the old entry %s for %s answered %s %s",
+                                old, day, d.status_code, d.text[:200])
+            except httpx.HTTPError as e:
+                log.warning("MyWhoosh calendar: removing the old entry for %s failed: %s", day, e)
+        return at
 
 
 def _body(r: httpx.Response) -> dict:
@@ -185,7 +238,8 @@ def to_workout(day: str, plan_day: dict, name: str, cheers: tuple[str, ...] = ()
         "IsRecovery": plan_day.get("intensity") == "recovery", "IsIntervals": any(s["IntervalId"] for s in steps),
         "FTPMode": "E_NoFTP", "IsTT": False, "IsTSS": False, "IsIF": False, "FTPMultiplier": 0, "StressPoint": 0,
         "Time": sum(s["Time"] for s in steps), "CustomTagDescription": "", "CategoryId": 1, "SubcategoryId": 0,
-        "Type": "E_Custom", "DisplayType": "E_byWatts", "StepCount": len(steps), "IsFavorite": False,
+        # A favourite is easier to find among MyWhoosh's many workouts (whether MyWhoosh honours it on upload is unknown)
+        "Type": "E_Custom", "DisplayType": "E_byWatts", "StepCount": len(steps), "IsFavorite": True,
         "CompletedCount": 0, "WorkoutStepsArray": steps, "WorkoutSteps": {str(s["Id"]): s for s in steps},
         "WorkoutstepsTMap": [], "WokoutAssociationId": 0, "AuthorName": "Training Coach",
         "TSS": plan_day.get("target_tss") or 0, "IF": 0, "KJ": 0, "IsVODAvailable": False,

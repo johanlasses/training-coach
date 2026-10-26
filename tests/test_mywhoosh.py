@@ -2,7 +2,7 @@ import base64
 import json
 import re
 import time
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 
 import httpx
 import pytest
@@ -10,7 +10,7 @@ from fastapi.testclient import TestClient
 
 from app import coaches, main, mywhoosh
 from app.db import DB
-from app.mywhoosh import LOGIN_URL, UPLOAD_URL, MyWhooshClient, MyWhooshError, to_steps, to_workout, workout_id
+from app.mywhoosh import MyWhooshClient, MyWhooshError, to_steps, to_workout, workout_id
 
 from .test_workouts import STEPS, step
 
@@ -23,17 +23,25 @@ def jwt(exp: float) -> str:
 
 
 class FakeMyWhoosh:
-    def __init__(self, login=None, upload=None):
+    """Login, upload and the calendar (task create/delete), at the module's URLs (conftest points them at .invalid)."""
+
+    def __init__(self, login=None, upload=None, task=None):
         self.calls = []
         self.login = login or {"Success": True, "WhooshId": "w-42", "AccessToken": jwt(time.time() + 86400),
                                "RefreshToken": "r"}
         self.upload = upload or (200, {"message": "Custom workout is being uploaded.", "status": True})
+        self.task = task or (200, {"status": True, "data": {"TaskId": "task-1"}})
 
     def __call__(self, request: httpx.Request) -> httpx.Response:
         body = json.loads(request.content) if request.content else {}
-        self.calls.append((str(request.url), request.headers.get("Authorization"), body))
-        if str(request.url) == LOGIN_URL:
+        url = str(request.url)
+        self.calls.append((request.method, url, request.headers.get("Authorization"), body))
+        if url == mywhoosh.LOGIN_URL:
             return httpx.Response(200 if self.login.get("Success") else 400, json=self.login)
+        if url == f"{mywhoosh.TASK_URL}/create":
+            return httpx.Response(self.task[0], json=self.task[1])
+        if url.startswith(f"{mywhoosh.TASK_URL}/"):  # DELETE task/<id>
+            return httpx.Response(200, json={"status": True, "data": {"id": url.rsplit("/", 1)[1]}})
         return httpx.Response(self.upload[0], json=self.upload[1])
 
 
@@ -85,7 +93,7 @@ async def test_connect_stores_the_token_not_the_password(db):
     fake = FakeMyWhoosh()
     acc = await client(db, fake).connect(" rider@example.com ", "hunter2")
     assert acc == {"email": "rider@example.com", "whoosh_id": "w-42"}
-    body = fake.calls[0][2]
+    body = fake.calls[0][3]
     assert (body["Username"], body["Password"], body["Platform"], body["Action"]) == ("rider@example.com", "hunter2", "Android", 1001)
     assert "hunter2" not in json.dumps(db.get("mywhoosh_token")) + json.dumps(db.get("mywhoosh_account"))
     assert MyWhooshClient(db).configured and db.get("mywhoosh_device") == body["DeviceId"]
@@ -108,8 +116,9 @@ async def test_upload_body_and_errors(db):
     await g.connect("rider@example.com", "pw")
     day = {"steps": STEPS, "description": "VO2", "target_tss": 50}
     wid = await g.upload_workout("2026-10-27", day, "Tue 27 Oct · VO2 5x3", ("Go",), "Last")
-    url, auth, body = fake.calls[-1]
-    assert url == UPLOAD_URL and auth.startswith("Bearer ") and wid == workout_id("2026-10-27", "w-42")
+    _, url, auth, body = fake.calls[-1]
+    assert url == mywhoosh.UPLOAD_URL and auth.startswith("Bearer ") and wid == workout_id("2026-10-27", "w-42")
+    assert body["WorkoutsData"][0]["IsFavorite"] is True  # easier to find among MyWhoosh's workouts
     assert body["UserId"] == "w-42" and body["SportsModeType"] == 0 and isinstance(body["SportsModeType"], int)
     assert body["WorkoutsData"][0]["Id"] == wid and body["WorkoutsData"][0]["SportsModeType"] == 0
     fake.upload = (200, {"message": "You don't have enough credit!", "status": False})
@@ -129,6 +138,64 @@ async def test_upload_body_and_errors(db):
     expired = DB(":memory:")
     expired.set("mywhoosh_token", {"access_token": jwt(time.time() - 10), "whoosh_id": "w", "expires_at": time.time() - 10})
     assert not MyWhooshClient(expired).configured
+
+
+async def test_schedule_puts_it_on_the_calendar_at_20_and_replaces_the_old_entry(db):
+    fake = FakeMyWhoosh()
+    g = client(db, fake)
+    await g.connect("rider@example.com", "pw")
+    morning = datetime(2026, 10, 26, 9, 30)
+    at = await g.schedule("2026-10-28", 123, "Wed 28 Oct · VO2", 2400, 55, morning)
+    method, url, _, body = fake.calls[-1]
+    assert (method, url, at) == ("POST", f"{mywhoosh.TASK_URL}/create", datetime(2026, 10, 28, 20, 0))
+    start = int(datetime(2026, 10, 28, 20, 0).astimezone().timestamp())  # epoch seconds, the container's time zone
+    assert body["TaskStartedTimeEpoc"] == start and body["TaskEndEpochTime"] == start + 2400
+    assert (body["TaskType"], body["TaskTypeId"], body["TSS"], body["SportMode"]) == ("E_Simple_Workout", "123", 55, "E_Cycling")
+    assert db.get("mywhoosh_tasks") == {"2026-10-28": "task-1"}
+    # Sending the day again: the new entry first, then the old one goes
+    fake.task = (200, {"status": True, "data": {"TaskId": "task-2"}})
+    await g.schedule("2026-10-28", 123, "Wed 28 Oct · VO2", 2400, 55, morning)
+    order = [(c[0], c[1]) for c in fake.calls[-2:]]
+    assert order == [("POST", f"{mywhoosh.TASK_URL}/create"), ("DELETE", f"{mywhoosh.TASK_URL}/task-1")]
+    assert db.get("mywhoosh_tasks") == {"2026-10-28": "task-2"}
+    # A past session goes on today's calendar; sent after 20:00 it's never in the past
+    assert await g.schedule("2026-10-19", 9, "Mon 19 Oct · Z2", 3600, 40, morning) == datetime(2026, 10, 26, 20, 0)
+    late = datetime(2026, 10, 26, 20, 30)
+    assert await g.schedule("2026-10-26", 9, "Today", 3600, 40, late) == datetime(2026, 10, 26, 20, 35)
+    # The id where a variant of the reply puts it; a reply without one is a failure, and the old entry stays
+    fake.task = (200, {"status": True, "TaskId": "task-9"})
+    await g.schedule("2026-10-30", 9, "x", 60, 0, morning)
+    assert db.get("mywhoosh_tasks")["2026-10-30"] == "task-9"
+    for reply in ((200, {"status": True}), (200, {"data": []}), (200, {"status": False, "message": "Invalid"}),
+                  (502, {"message": "Bad gateway"})):
+        fake.task = reply
+        with pytest.raises(MyWhooshError, match="calendar"):
+            await g.schedule("2026-10-28", 123, "x", 60, 0, morning)
+    assert db.get("mywhoosh_tasks")["2026-10-28"] == "task-2"  # nothing deleted when the new one failed
+
+
+async def test_a_refused_favourite_upload_is_sent_again_without_it(db):
+    fake = FakeMyWhoosh()
+    g = client(db, fake)
+    await g.connect("rider@example.com", "pw")
+    seen = []
+
+    def picky(request):
+        body = json.loads(request.content)
+        if str(request.url) == mywhoosh.UPLOAD_URL:
+            fav = body["WorkoutsData"][0]["IsFavorite"]
+            seen.append(fav)
+            return httpx.Response(400 if fav else 200, json={"status": not fav, "message": "IsFavorite not allowed" if fav else "ok"})
+        return fake(request)
+
+    g.http = httpx.AsyncClient(transport=httpx.MockTransport(picky))
+    await g.upload_workout("2026-10-27", {"steps": STEPS, "description": "", "target_tss": 50}, "x")
+    assert seen == [True, False]  # never worse than before 0.10.3
+    fake.upload = (200, {"message": "You don't have enough credit!", "status": False})
+    g.http = httpx.AsyncClient(transport=httpx.MockTransport(fake))
+    with pytest.raises(MyWhooshError, match="no room"):  # a full account isn't retried
+        await g.upload_workout("2026-10-27", {"steps": STEPS, "description": "", "target_tss": 50}, "x")
+    assert [c[3]["WorkoutsData"][0]["IsFavorite"] for c in fake.calls if c[1] == mywhoosh.UPLOAD_URL][-1] is True
 
 
 @pytest.fixture
@@ -168,6 +235,12 @@ def test_pick_mywhoosh_connect_and_send(web, monkeypatch):
         sent.update(day=day, name=name, last_rep=last_rep)
         return workout_id(day, "w")
 
+    async def schedule(self, day, wid, name, seconds, tss, now=None):
+        sent.update(scheduled=(day, wid, seconds > 0))
+        return datetime.combine(date.fromisoformat(day), datetime.min.time().replace(hour=20))
+
+    monkeypatch.setattr(MyWhooshClient, "schedule", schedule)
+
     monkeypatch.setattr(MyWhooshClient, "connect", connect)
     monkeypatch.setattr(MyWhooshClient, "upload_workout", upload)
     r = web.post("/profile/mywhoosh/connect", data={"mywhoosh_email": "rider@example.com", "mywhoosh_password": "pw"})
@@ -179,7 +252,8 @@ def test_pick_mywhoosh_connect_and_send(web, monkeypatch):
     plan = web.get(f"/plan?week={web.day}").text
     assert f'action="/plan/{web.plan_id}/{web.day}/mywhoosh"' in plan and "Send to MyWhoosh" in plan
     r = web.post(f"/plan/{web.plan_id}/{web.day}/mywhoosh")
-    assert "is in MyWhoosh under My Workouts" in r.text and "In MyWhoosh since" in r.text and "Send again" in r.text
+    assert "on your calendar" in r.text and "at 20:00 and in My Workouts" in r.text and "Send again" in r.text
+    assert sent["scheduled"] == (web.day, workout_id(web.day, "w"), True)
     assert sent["day"] == web.day and sent["last_rep"] == coaches.get("carmichael").last_rep and "VO2 5x3" in sent["name"]
     r = web.post("/profile/mywhoosh/disconnect")
     assert not st.mywhoosh.configured and "login has expired" not in r.text  # disconnected, not expired
@@ -206,3 +280,23 @@ def test_upload_failure_is_flashed(web, monkeypatch):
     monkeypatch.setattr(MyWhooshClient, "upload_workout", boom)
     assert "Couldn" in web.post(f"/plan/{web.plan_id}/{web.day}/mywhoosh").text
     assert mywhoosh.ID_BASE < workout_id("2026-01-01")
+
+
+def test_a_calendar_failure_still_reports_the_upload(web, monkeypatch):
+    st = web.st
+    st.cfg.workout_app = "mywhoosh"
+    st.save()
+    st.reload()
+    st.db.set("mywhoosh_token", {"access_token": "t", "whoosh_id": "w", "expires_at": time.time() + 3600})
+
+    async def upload(self, day, plan_day, name, cheers=(), last_rep=""):
+        return workout_id(day, "w")
+
+    async def no_calendar(self, *a, **k):
+        raise MyWhooshError("it isn't on the MyWhoosh calendar")
+
+    monkeypatch.setattr(MyWhooshClient, "upload_workout", upload)
+    monkeypatch.setattr(MyWhooshClient, "schedule", no_calendar)
+    r = web.post(f"/plan/{web.plan_id}/{web.day}/mywhoosh")
+    assert r.status_code == 200 and "under My Workouts, but it isn" in r.text and "on the MyWhoosh calendar" in r.text
+    assert f"{web.plan_id}/{web.day}" in (st.db.get("mywhoosh_uploads") or {}) and "Send again" in r.text

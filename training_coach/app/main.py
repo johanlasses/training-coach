@@ -53,6 +53,7 @@ class State:
         self.db = DB(path)
         self.owner, self.user_id, self.name = owner, user_id, name
         self.jobs: dict[str, dict] = {}
+        self.send_lock = asyncio.Lock()  # one Send to MyWhoosh at a time per athlete
         self.flash: tuple[str, str] | None = None   # (kind, message) shown once on the next page
         self._tasks: set[asyncio.Task] = set()
         self.sync_tried: datetime | None = None  # last scheduled attempt, so a failing sync doesn't retry every minute
@@ -687,17 +688,25 @@ async def mywhoosh_upload(request: Request, plan_id: int, day: str):
     st = athlete(request)
     plan, d, _ = zwift_day(st, plan_id, day)  # the same indoor sessions, the same coach's cheers
     c = coaches.get(plan["coach"])
-    try:
-        await st.mywhoosh.upload_workout(day, d, f"{date.fromisoformat(day).strftime('%a %-d %b')} · {d['title']}",
-                                         c.cheers, c.last_rep)
-    except (MyWhooshError, httpx.HTTPError) as e:
-        log.warning("MyWhoosh upload failed: %s", e)
-        st.flash = ("error", f"Couldn't send “{d['title']}” to MyWhoosh: {e}")
-    else:
+    name = f"{date.fromisoformat(day).strftime('%a %-d %b')} · {d['title']}"
+    async with st.send_lock:  # a double tap mustn't make two calendar entries, one of them never tracked
+        try:
+            workout_id = await st.mywhoosh.upload_workout(day, d, name, c.cheers, c.last_rep)
+        except (MyWhooshError, httpx.HTTPError) as e:
+            log.warning("MyWhoosh upload failed: %s", e)
+            st.flash = ("error", f"Couldn't send “{d['title']}” to MyWhoosh: {e}")
+            return back(request, f"/plan?week={plan['week_start']}")
         uploads = st.db.get("mywhoosh_uploads") or {}
         uploads[f"{plan_id}/{day}"] = datetime.now().isoformat(timespec="minutes")
         st.db.set("mywhoosh_uploads", uploads)
-        st.flash = ("ok", f"“{d['title']}” is in MyWhoosh under My Workouts. Sending this day again replaces it.")
+        try:  # the calendar entry makes it easy to find among MyWhoosh's workouts; the upload counts either way
+            at = await st.mywhoosh.schedule(day, workout_id, name, workouts.total_seconds(d["steps"]), d.get("target_tss") or 0)
+            where = "today" if at.date() == date.today() else at.strftime("%a %-d %b")
+            st.flash = ("ok", f"“{d['title']}” is in MyWhoosh: on your calendar {where} at {at:%H:%M} and in My Workouts. "
+                              "Sending this day again replaces it.")
+        except (MyWhooshError, httpx.HTTPError) as e:
+            log.warning("MyWhoosh calendar entry failed: %s", e)
+            st.flash = ("ok", f"“{d['title']}” is in MyWhoosh under My Workouts, but it isn't on the MyWhoosh calendar.")
     return back(request, f"/plan?week={plan['week_start']}")
 
 

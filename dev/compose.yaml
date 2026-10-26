@@ -19,6 +19,7 @@ services:
       TC_GARMIN_URL: http://fakes:8004
       TC_MYWHOOSH_LOGIN_URL: http://fakes:8005/http-service/api/login
       TC_MYWHOOSH_UPLOAD_URL: http://fakes:8005/api/v2/client/custom-workout-upload
+      TC_MYWHOOSH_TASK_URL: http://fakes:8005/v1/task
     volumes:
       - addon-data:/data
     networks: [internal]  # no internet and no published port: reachable only through the fake ingress
