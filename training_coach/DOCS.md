@@ -262,7 +262,9 @@ Other Home Assistant users can have their own Training Coach: their own Strava o
 (the user who set HA up) owns the add-on and decides who gets in.
 
 1. Create the person in **Settings → People** with login allowed and *not* an administrator.
-2. They open **Training** in the sidebar and get an "ask for access" page. You approve them under
+2. They open **Training** in the sidebar and get an "ask for access" page. If a non-admin doesn't see **Training**
+   at all (Home Assistant can keep the panel admin-only from an older version), turn **Show in sidebar** off and on
+   again on the add-on's Info page, or restart Home Assistant. Don't make them an administrator for it. You approve them under
    **Settings → Athletes**, which also shows what each athlete's Claude calls cost this month.
 3. They install the Home Assistant iPhone app and sign in **as themselves**. Their phone is then theirs in the add-on:
    only its notify service and Apple Health sensors can be picked on their Settings and Profile.
@@ -270,6 +272,12 @@ Other Home Assistant users can have their own Training Coach: their own Strava o
    through your Strava API app: raise its athlete capacity from 1 to 10 on
    [strava.com/settings/api](https://www.strava.com/settings/api) (no review needed). Its rate limit is shared by
    everyone. An athlete can enter their own Strava API app on Settings instead.
+
+If something lands in the wrong place (say your own Strava was still signed in on their phone when they connected),
+**Settings → Athletes → Reset … data** clears that athlete's synced activities, health data and/or Strava
+connection. You type their name to confirm, their database is backed up first
+(`athletes/<id>/training.db.before-reset-<time>`, kept for 30 days), and nobody else's data is touched. The add-on
+also refuses a Strava account that's already connected for another athlete.
 
 What's shared: your Claude API key (they can't see or change it) and, unless they set their own, the Strava app.
 A Garmin key is always the athlete's own.

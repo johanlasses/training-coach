@@ -5,6 +5,7 @@ import asyncio
 import logging
 import re
 import time
+import unicodedata
 from contextlib import asynccontextmanager
 from dataclasses import replace
 from datetime import date, datetime, timedelta, timezone
@@ -406,6 +407,7 @@ class Athletes:
         self.owner.name = self.owner.db.get("owner_name") or ""  # shown to the others ("Johan's Strava app")
         self.others = {uid: self._state(uid, a["name"]) for uid, a in self.listed().items()}
         self._tasks: dict[str, asyncio.Task] = {}
+        self._parked: dict[str, State] = {}  # removed athletes' States, reused if they're approved again
 
     def _state(self, uid: str, name: str) -> State:
         return State(DATA_DIR / "athletes" / uid / "training.db", owner=self.owner, user_id=uid, name=name)
@@ -457,7 +459,11 @@ class Athletes:
         req = reqs.pop(uid)
         self.owner.db.set("access_requests", reqs)
         self.owner.db.set("athletes", self.listed() | {uid: {"name": req["name"], "added": date.today().isoformat()}})
-        self.others[uid] = st = self._state(uid, req["name"])
+        # Removed earlier in this run: the same State again, never a second one (a second SQLite connection to the
+        # same file, and jobs the reset's busy check couldn't see)
+        st = self._parked.pop(uid, None) or self._state(uid, req["name"])
+        st.name = req["name"]
+        self.others[uid] = st
         self.start(uid, st)
         return req["name"]
 
@@ -471,10 +477,89 @@ class Athletes:
         listed = self.listed()
         a = listed.pop(uid, None)
         self.owner.db.set("athletes", listed)
-        self.others.pop(uid, None)
         if task := self._tasks.pop(uid, None):
             task.cancel()
+        if st := self.others.pop(uid, None):
+            for job in list(st._tasks):  # a sync or a coach call mustn't keep writing for someone who's gone
+                job.cancel()
+            st.jobs.clear()
+            self._parked[uid] = st
         return a and a["name"]
+
+    RESET_BACKUP_DAYS = 30  # pre-reset backups are kept this long; by age, so a run of resets can't push one out
+
+    def reset(self, uid: str, confirm: str, activities: bool, health_data: bool, strava: bool) -> tuple[bool, str]:
+        """The owner clears what went wrong in one athlete's add-on (e.g. the owner's own Strava signed in there):
+        their synced activities, health data and/or Strava connection. Plans, chat, notes and memory are kept, as on
+        a source switch. Returns (done, message).
+
+        Every athlete has their own SQLite file, and this must only ever touch that one. So, before anything changes:
+        the athlete is a listed non-owner whose State's DB file is exactly athletes/<uid>/training.db (never the
+        owner's file), the owner typed that athlete's name, and no job is writing to the DB. Then the file is backed
+        up next to itself, and only then cleared."""
+        st, listed = self.others.get(uid), self.listed().get(uid)
+        if not ATHLETE_ID.fullmatch(uid) or not st or not listed or st is self.owner:
+            return False, "That athlete is gone."
+        name = listed["name"]
+        expected = (DATA_DIR / "athletes" / uid / "training.db").resolve()
+        if st.db.path.resolve() != expected or expected == self.owner.db.path.resolve() or st.owner is not self.owner:
+            log.error("Reset refused: %s's DB is %s, expected %s", uid, st.db.path, expected)
+            return False, f"Refused: {name}'s data isn't where it should be. Nothing was changed."
+        if not (activities or health_data or strava):
+            return False, f"Nothing picked to reset for {name}."
+        if same_name(confirm) != same_name(name):
+            return False, f"Type {name}'s name to confirm the reset. Nothing was changed."
+        if any(j.get("running") for j in st.jobs.values()):  # any job: a list of names would drift
+            return False, f"{name}'s add-on is busy (a sync or the coach) right now. Try again in a minute."
+        strava_id = (st.db.get("strava_athlete") or {}).get("id") if st.db.get("strava_token") else None
+        if activities and not strava and (holder := self.strava_holder(strava_id, st)):
+            # The next sync would bring the same wrong activities straight back
+            return False, (f"{name}'s Strava is {holder.name or 'the owner'}'s account: tick Strava connection too, or "
+                           "the next sync brings the same activities back. Nothing was changed.")
+        left = {"activities": activities and st.db.count_activities() > 0,
+                "health": health_data and st.db.count_health_days() > 0, "strava": strava and bool(strava_id)}
+        if not any(left.values()):  # e.g. the same form sent twice: nothing to do, and no backup of an empty DB
+            return False, f"Nothing left to reset for {name}: what you ticked is already empty."
+        stamp = datetime.now().strftime("%Y%m%d-%H%M%S-%f")
+        backup = expected.with_name(f"training.db.before-reset-{stamp}")
+        if backup.exists():
+            return False, f"A reset for {name} is already under way. Nothing was changed."
+        try:
+            st.db.backup(backup)
+        except Exception as e:  # noqa: BLE001 - no backup, no reset
+            log.exception("Reset backup failed for %s", uid)
+            backup.unlink(missing_ok=True)  # a half-written file isn't a backup
+            return False, f"Couldn't back up {name}'s data first ({e}). Nothing was changed."
+        cutoff = time.time() - self.RESET_BACKUP_DAYS * 86400
+        for old in expected.parent.glob("training.db.before-reset-*"):
+            if old != backup and old.stat().st_mtime < cutoff:
+                old.unlink(missing_ok=True)
+        log.info("Reset for %s (%s): activities=%s health=%s strava=%s; backup %s", name, uid, activities, health_data,
+                 strava, backup.name)
+        done = []
+        if strava:
+            st.strava.disconnect()
+            done.append("Strava disconnected")
+        if activities:
+            st.db.clear_activities()
+            for k in ("last_activity_start", "last_sync", "kinds_backfilled"):
+                st.db.set(k, None)
+            st.db.set("mark_notified", True)  # what syncs back in isn't new: no round of pushes
+            done.append("synced activities removed")
+        if health_data:
+            st.db.clear_health()
+            st.db.set("health_fetched", None)
+            done.append("health data removed")
+        return True, (f"{name}: {', '.join(done)}. Plans, chat, notes and memory are kept. A backup from before the "
+                      f"reset is in athletes/{uid}/{backup.name}.")
+
+    def strava_holder(self, strava_id, but: State) -> State | None:
+        """Another athlete (or the owner) whose add-on already has this Strava account connected."""
+        for st in [self.owner, *self.others.values()]:
+            if st is not but and strava_id and (st.db.get("strava_athlete") or {}).get("id") == strava_id \
+                    and st.db.get("strava_token"):
+                return st
+        return None
 
     def reload_shared(self) -> None:
         """After the owner's settings change: the others pick up the Claude key and Strava app."""
@@ -493,6 +578,12 @@ class Athletes:
     def stop_all(self) -> None:
         for task in self._tasks.values():
             task.cancel()
+
+
+def same_name(s: str) -> str:
+    """A typed name as compared for the reset's confirmation: case, spacing, and iOS's curly apostrophes don't count."""
+    s = unicodedata.normalize("NFKC", s).replace("’", "'").replace("‘", "'")
+    return " ".join(s.split()).casefold()
 
 
 def athlete(request: Request) -> State:
@@ -1077,9 +1168,16 @@ def athletes_overview(request: Request, now: datetime) -> dict:
     """For the owner's Settings: who's in, what their Claude calls cost this month, and who asked for access."""
     reg: Athletes = request.app.state.athletes
     month = now.strftime("%Y-%m-01")
-    rows = [{"uid": uid, "name": a["name"], "added": a["added"],
-             "cost": sum(u["cost"] for u in reg.others[uid].db.llm_usage(month, llm.cost).values()) if uid in reg.others else 0}
-            for uid, a in reg.listed().items()]
+    rows = []
+    for uid, a in reg.listed().items():
+        st = reg.others.get(uid)
+        who = (st.db.get("strava_athlete") or {}) if st and st.db.get("strava_token") else {}
+        rows.append({"uid": uid, "name": a["name"], "added": a["added"],
+                     "cost": sum(u["cost"] for u in st.db.llm_usage(month, llm.cost).values()) if st else 0,
+                     # what the reset can clear, so the owner sees whose Strava is connected before resetting
+                     "strava": f"{who.get('firstname') or ''} {who.get('lastname') or ''}".strip() if who else None,
+                     "activities": st.db.count_activities() if st else 0,
+                     "health_days": st.db.count_health_days() if st else 0})
     return {"rows": rows, "requests": reg.requests(),
             "own_cost": sum(u["cost"] for u in reg.owner.db.llm_usage(month, llm.cost).values())}
 
@@ -1088,6 +1186,11 @@ def athletes_overview(request: Request, now: datetime) -> dict:
 async def athletes_action(request: Request, uid: str, action: str):
     st = owner_only(request)
     reg: Athletes = request.app.state.athletes
+    if action == "reset":
+        form = await request.form()
+        ok, message = reg.reset(uid, str(form.get("confirm", "")), "activities" in form, "health" in form, "strava" in form)
+        st.flash = ("ok" if ok else "error", message)
+        return back(request, "/settings")
     done = {"approve": reg.approve, "dismiss": reg.dismiss, "remove": reg.remove}.get(action)
     if not done or not ATHLETE_ID.fullmatch(uid):
         raise HTTPException(404)
@@ -1238,8 +1341,22 @@ async def garmin_disconnect(request: Request):
 async def strava_connect(request: Request):
     st = athlete(request)
     pasted = str((await request.form()).get("redirect_url", ""))
+    reg: Athletes = request.app.state.athletes
+
+    def taken(who: dict) -> str | None:
+        """One Strava account, one athlete: someone signed in to Strava on a shared phone mustn't feed another add-on.
+        Checked before the new login is stored, so the connection that was there (the owner's own too) stays."""
+        holder = reg.strava_holder(who.get("id"), st)
+        if not holder:
+            return None
+        name = f"{who.get('firstname') or ''} {who.get('lastname') or ''}".strip()
+        if st.is_owner:
+            return (f"Your Strava account ({name}) is connected in {holder.name}'s add-on. Reset their Strava connection "
+                    "under Settings → Athletes first, then connect again.")
+        return (f"That Strava account ({name}) is already connected for {holder.name or 'the owner'}. "
+                "Sign out of Strava in the browser, sign in as yourself, and connect again.")
     try:
-        who = await st.strava.exchange_code(pasted)
+        who = await st.strava.exchange_code(pasted, refuse=taken)
     except (ValueError, KeyError) as e:
         st.flash = ("error", str(e))
         return back(request, "/profile")

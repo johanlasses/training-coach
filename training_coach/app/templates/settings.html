@@ -32,6 +32,21 @@
     {% for a in athletes.rows %}
     <tr><td>{{ a.name }}</td><td>{{ a.added }}</td><td class="num">${{ '%.2f' % a.cost }}</td>
       <td class="num"><form method="post" action="{{ base }}/athletes/{{ a.uid }}/remove"><button class="secondary">Remove</button></form></td></tr>
+    <tr class="reset-row"><td colspan="4">
+      {#- For when something went wrong in their add-on, e.g. the wrong Strava account signed in there -#}
+      <details><summary class="muted">Reset {{ a.name }}'s data…</summary>
+        {#- tojson in a single-quoted attribute: a name with a quote can't break out of the string -#}
+        <form method="post" action="{{ base }}/athletes/{{ a.uid }}/reset" class="reset-form"
+              onsubmit='return confirm({{ ("Reset the ticked items for " ~ a.name ~ "? This can’t be undone. Plans, chat, notes and memory are kept.") | tojson }})'>
+          <label class="inline"><input type="checkbox" name="activities"> Synced activities ({{ a.activities }})</label>
+          <label class="inline"><input type="checkbox" name="health"> Health data ({{ a.health_days }} days)</label>
+          <label class="inline"><input type="checkbox" name="strava" {{ 'disabled' if not a.strava }}>
+            Strava connection{% if a.strava %} ({{ a.strava }}){% else %} (not connected){% endif %}</label>
+          <label class="reset-confirm">Type <b>{{ a.name }}</b> to confirm
+            <input name="confirm" autocomplete="off" autocorrect="off" spellcheck="false" required></label>
+          <p class="facts">Only {{ a.name }}'s own data is touched, and it's backed up first.</p>
+          <button class="secondary">Reset</button>
+        </form></details></td></tr>
     {% endfor %}
   </table>
   {% if athletes.requests %}
@@ -67,9 +82,8 @@
   </details>
   {% else %}
   <p class="caption">Strava only lets apps sign people in through an API application of your own{% if is_owner %}. Every
-    athlete who picks Strava on Profile signs in through it, but a new Strava app connects only you until Strava
-    raises its athlete limit (their developer program review): until then, other athletes enter an app of their own
-    on their Settings{% endif %}. Create one at
+    athlete who picks Strava on Profile signs in through it, but a new Strava app connects only you: raise its
+    <b>athlete capacity</b> (up to 10, no review) on the app's page at strava.com/settings/api{% endif %}. Create one at
     <a href="https://www.strava.com/settings/api" target="_blank" rel="noopener">strava.com/settings/api</a> and set
     <b>Authorization Callback Domain</b> to <code>localhost</code>. Any name, website and icon will do. Then connect
     your account on <a href="{{ base }}/profile#conn-strava">Profile</a>.</p>

@@ -287,6 +287,13 @@ table.usage { margin-bottom: 8px; }
 .form-page .hint-row { font-size: 14px; margin: 0 0 12px; }
 .form-page .hint-row small.hint { display: inline; }
 table.usage td.num { width: auto; }
+/* Settings → Athletes: the owner's reset, folded under each athlete; the choices wrap on a phone */
+.reset-row td { padding-top: 0; }
+.reset-row summary { font-size: 13px; cursor: pointer; }
+.reset-form { display: flex; flex-wrap: wrap; align-items: center; gap: 0 4px; padding: 8px 0 4px; }
+.reset-form label.inline { margin-bottom: 8px; }
+.reset-form .reset-confirm { flex-basis: 100%; }
+.reset-form .facts { flex-basis: 100%; margin: 0 0 8px; font-size: 13px; color: var(--text-secondary); }
 .form-page .days { display: flex; flex-wrap: wrap; gap: 0 12px; margin-bottom: 4px; }
 .form-page .days label.inline { margin-right: 0; }
 @media (max-width: 700px) { .form-page .grid2, .form-page .grid2.wide-first, .form-page .grid3 { grid-template-columns: 1fr; } }

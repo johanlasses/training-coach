@@ -127,6 +127,7 @@ JSON_COLUMNS = {"mmp", "power_hist", "spark_watts", "spark_hr", "feedback"}
 
 class DB:
     def __init__(self, path: Path | str):
+        self.path = Path(path)
         self.conn = sqlite3.connect(str(path), check_same_thread=False)
         self.conn.row_factory = sqlite3.Row
         self.conn.executescript(SCHEMA)
@@ -424,6 +425,20 @@ class DB:
     def mark_all_notified(self) -> None:
         self.conn.execute("UPDATE activities SET notified=1")
         self.conn.commit()
+
+    def count_activities(self) -> int:
+        return self.conn.execute("SELECT COUNT(*) FROM activities").fetchone()[0]
+
+    def count_health_days(self) -> int:
+        return self.conn.execute("SELECT COUNT(DISTINCT date) FROM health_daily").fetchone()[0]
+
+    def backup(self, dest: Path) -> None:
+        """A consistent copy of this DB (SQLite's online backup), e.g. before the owner resets an athlete's data."""
+        target = sqlite3.connect(str(dest))
+        try:
+            self.conn.backup(target)
+        finally:
+            target.close()
 
     def clear_activities(self) -> None:
         """On a switch of activity source: ids from two services could collide, and the same ride would count twice."""

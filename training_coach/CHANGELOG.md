@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.11.2 (2026-10-27)
+
+- **Reset an athlete's data (owner only).** Settings → Athletes has **Reset … data** under each athlete: tick their
+  synced activities, health data and/or Strava connection, type their name to confirm, and only that athlete's data is
+  cleared. Their database is backed up first; plans, chat, notes and memory are kept. For when the wrong Strava
+  account got signed in on their phone.
+- **One Strava account, one athlete.** A Strava account that's already connected for someone (the owner too) can't be
+  connected for another athlete. The message says so, and to sign out of Strava in the browser first.
+- **Strava's athlete limit, correctly.** The owner can raise the Strava app's athlete capacity to 10 on
+  strava.com/settings/api, no review needed; the messages and Settings now say so.
+
 ## 0.11.1 (2026-10-26)
 
 - **A clear message when the Strava app is full.** Strava lets a new API app connect only its owner. A second athlete

@@ -263,7 +263,7 @@ def test_connecting_strava_while_rides_come_from_garmin_doesnt_sync_garmin(web, 
     st.reload()
     started = []
 
-    async def exchange(self, pasted):
+    async def exchange(self, pasted, refuse=None):
         self.db.set("strava_token", {"refresh_token": "r"})
         return {"firstname": "Dev", "lastname": "Rider"}
 

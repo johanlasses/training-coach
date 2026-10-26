@@ -1,4 +1,5 @@
 """Several athletes on one add-on: who's who comes from Supervisor's ingress headers, each has their own DB."""
+from html import unescape
 from pathlib import Path
 
 import pytest
@@ -216,3 +217,154 @@ def test_a_phone_name_prefix_does_not_reach_another_phone():
               {"entity_id": "sensor.iphone_resting_heart_rate", "state": "60", "attributes": {"unit_of_measurement": "bpm"}}]
     assert [c["entity_id"] for c in health.candidates(states, ["iphone"])] == ["sensor.iphone_resting_heart_rate"]
     assert not main.own_phone("health_rhr_entity", "sensor.iphone_2_resting_heart_rate", ["iphone"])
+
+
+def owners_strava_in_annas_db(anna):
+    """The owner's own Strava signed in on Anna's add-on (seen live 2026-10-27): Johan's rides in Anna's DB."""
+    anna.db.set("strava_token", {"access_token": "t", "refresh_token": "r", "expires_at": 9e9})
+    anna.db.set("strava_athlete", {"id": 1, "firstname": "Johan", "lastname": "L"})
+    anna.db.upsert_activity_summary({"id": 7, "name": "Johan's ride", "sport_type": "Ride", "start_date": "2026-10-20T06:00:00Z",
+                                     "start_date_local": "2026-10-20T08:00:00", "moving_time": 3600})
+    anna.db.set_health("2026-10-20", "rhr", 48, "bpm")
+    anna.db.set("last_activity_start", "2026-10-20T06:00:00Z")
+    anna.db.add_note("2026-10-20T08:00:00", "event", "2026-11-08", "2026-11-08", "Gravel race")
+
+
+def test_owner_resets_an_athletes_synced_data(client):
+    let_in(client, ANNA, "Anna")
+    anna = main.app.state.athletes.others[ANNA]
+    owners_strava_in_annas_db(anna)
+    html = client.get("/settings", headers=as_user(OWNER, "Johan")).text
+    assert f"/athletes/{ANNA}/reset" in html and "Strava connection (Johan L)" in html and "Synced activities (1)" in html
+    owner = as_user(OWNER, "Johan")
+    # Only the owner can reset
+    assert client.post(f"/athletes/{ANNA}/reset", headers=as_user(ANNA, "Anna"),
+                       data={"activities": "on", "confirm": "Anna"}).status_code == 403
+    r = client.post(f"/athletes/{ANNA}/reset", headers=owner, data={"confirm": "Anna"})
+    assert "Nothing picked" in r.text and anna.db.activities()
+    # The name must be typed: a wrong row or a stray resubmit changes nothing
+    for wrong in ("", "Eve", "Johan"):
+        r = client.post(f"/athletes/{ANNA}/reset", headers=owner, data={"activities": "on", "confirm": wrong})
+        assert "Type Anna's name to confirm" in unescape(r.text) and anna.db.activities()
+    assert not list(anna.db.path.parent.glob("training.db.before-reset-*"))
+    r = client.post(f"/athletes/{ANNA}/reset", headers=owner, data={"activities": "on", "strava": "on", "confirm": " anna "})
+    assert "Anna: Strava disconnected, synced activities removed" in r.text
+    assert not anna.db.activities() and not anna.strava.configured and anna.db.get("strava_athlete") is None
+    assert anna.db.get("last_activity_start") is None and anna.db.get("mark_notified")  # the right rides don't push
+    assert anna.db.health("") and anna.db.active_notes("2026-10-27")  # health not ticked; notes always kept
+    # The backup from just before holds what was removed
+    (backup,) = anna.db.path.parent.glob("training.db.before-reset-*")
+    assert [a["name"] for a in main.DB(backup).activities()] == ["Johan's ride"]
+    client.post(f"/athletes/{ANNA}/reset", headers=owner, data={"health": "on", "confirm": "Anna"})
+    assert not anna.db.health("")
+
+
+def test_a_reset_never_touches_another_athletes_db(client, monkeypatch):
+    import hashlib
+    let_in(client, ANNA, "Anna")
+    let_in(client, EVE, "Eve")
+    reg = main.app.state.athletes
+    anna, eve = reg.others[ANNA], reg.others[EVE]
+    for st in (reg.owner, anna, eve):
+        owners_strava_in_annas_db(st)  # everyone has activities, health and a Strava login
+    digest = lambda st: hashlib.sha256(st.db.path.read_bytes()).hexdigest()  # noqa: E731
+    before = {"owner": digest(reg.owner), "eve": digest(eve)}
+    r = client.post(f"/athletes/{ANNA}/reset", headers=as_user(OWNER, "Johan"),
+                    data={"activities": "on", "health": "on", "strava": "on", "confirm": "Anna"})
+    assert "Anna: Strava disconnected" in r.text and not anna.db.activities()
+    assert {"owner": digest(reg.owner), "eve": digest(eve)} == before  # byte for byte
+    # The owner can't be reset through this, not even by their own id
+    r = client.post(f"/athletes/{OWNER}/reset", headers=as_user(OWNER, "Johan"), data={"activities": "on", "confirm": "Johan"})
+    assert "That athlete is gone" in r.text and reg.owner.db.activities()
+    # A State whose DB isn't athletes/<uid>/training.db (a bug elsewhere) is refused before anything happens
+    monkeypatch.setattr(eve.db, "path", reg.owner.db.path)
+    r = client.post(f"/athletes/{EVE}/reset", headers=as_user(OWNER, "Johan"), data={"activities": "on", "confirm": "Eve"})
+    assert "Refused: Eve's data isn't where it should be" in unescape(r.text)
+    assert reg.owner.db.activities() and eve.db.activities() and digest(reg.owner) == before["owner"]
+    # A reset while a sync writes to the DB waits
+    monkeypatch.setattr(eve.db, "path", main.DATA_DIR / "athletes" / EVE / "training.db")
+    eve.jobs["sync"] = {"running": True}
+    r = client.post(f"/athletes/{EVE}/reset", headers=as_user(OWNER, "Johan"), data={"activities": "on", "confirm": "Eve"})
+    assert "busy" in r.text and eve.db.activities()
+
+
+def test_one_strava_account_connects_one_athlete(client, monkeypatch):
+    let_in(client, ANNA, "Anna")
+    reg = main.app.state.athletes
+    reg.owner.db.set("strava_token", {"access_token": "t", "refresh_token": "r", "expires_at": 9e9})
+    reg.owner.db.set("strava_athlete", {"id": 1, "firstname": "Johan", "lastname": "L"})
+    anna = reg.others[ANNA]
+
+    async def johans_strava(self, pasted, refuse=None):  # Johan still signed in to Strava on the shared phone
+        who = {"id": 1, "firstname": "Johan", "lastname": "L"}
+        if refuse and (reason := refuse(who)):  # like StravaClient.exchange_code: asked before anything is stored
+            raise ValueError(reason)
+        self.db.set("strava_token", {"access_token": "t2", "refresh_token": "r2", "expires_at": 9e9})
+        self.db.set("strava_athlete", who)
+        return who
+    monkeypatch.setattr(main.StravaClient, "exchange_code", johans_strava)
+    r = client.post("/settings/strava/connect", headers=as_user(ANNA, "Anna"), data={"redirect_url": "x"})
+    assert "already connected for Johan" in r.text and not anna.strava.configured
+    assert reg.owner.db.get("strava_token")["refresh_token"] == "r"  # the owner's own connection is untouched
+
+
+def test_owner_reconnecting_keeps_their_strava_when_an_athlete_holds_it(client, monkeypatch):
+    # The reviewer's case: Anna's add-on still holds Johan's Strava, and Johan reconnects his own
+    let_in(client, ANNA, "Anna")
+    reg = main.app.state.athletes
+    owners_strava_in_annas_db(reg.others[ANNA])
+    reg.owner.db.set("strava_token", {"access_token": "t", "refresh_token": "johans", "expires_at": 9e9})
+    reg.owner.db.set("strava_athlete", {"id": 1, "firstname": "Johan", "lastname": "L"})
+
+    async def exchange(self, pasted, refuse=None):
+        who = {"id": 1, "firstname": "Johan", "lastname": "L"}
+        if refuse and (reason := refuse(who)):
+            raise ValueError(reason)
+        self.db.set("strava_token", {"access_token": "new", "refresh_token": "new", "expires_at": 9e9})
+        return who
+    monkeypatch.setattr(main.StravaClient, "exchange_code", exchange)
+    r = client.post("/settings/strava/connect", headers=as_user(OWNER, "Johan"), data={"redirect_url": "x"})
+    assert "connected in Anna" in unescape(r.text) and "Reset their Strava connection" in r.text
+    assert reg.owner.db.get("strava_token")["refresh_token"] == "johans"  # nothing stored, nothing lost
+
+
+def test_reset_double_submit_activities_only_and_a_curly_apostrophe(client):
+    let_in(client, ANNA, "Anna")
+    reg = main.app.state.athletes
+    anna = reg.others[ANNA]
+    owners_strava_in_annas_db(anna)
+    reg.owner.db.set("strava_token", {"access_token": "t", "refresh_token": "r", "expires_at": 9e9})
+    reg.owner.db.set("strava_athlete", {"id": 1, "firstname": "Johan", "lastname": "L"})
+    owner = as_user(OWNER, "Johan")
+    # Activities alone while Johan's Strava stays connected: the next sync would bring them straight back
+    r = client.post(f"/athletes/{ANNA}/reset", headers=owner, data={"activities": "on", "confirm": "Anna"})
+    assert "tick Strava connection too" in r.text and anna.db.activities()
+    data = {"activities": "on", "strava": "on", "confirm": "anna "}
+    assert "Strava disconnected" in client.post(f"/athletes/{ANNA}/reset", headers=owner, data=data).text
+    # The same form again (a double tap, a resubmit): nothing to do, and the good backup stays the only one
+    r = client.post(f"/athletes/{ANNA}/reset", headers=owner, data=data)
+    assert "Nothing left to reset" in r.text
+    (backup,) = anna.db.path.parent.glob("training.db.before-reset-*")
+    assert main.DB(backup).count_activities() == 1
+    assert main.same_name("O’Brien ") == main.same_name("o'brien")  # iOS smart punctuation still matches
+
+
+async def test_removed_then_readded_athlete_gets_the_same_state_and_no_orphan_jobs(client):
+    import asyncio
+    let_in(client, ANNA, "Anna")
+    reg = main.app.state.athletes
+    anna = reg.others[ANNA]
+    started = asyncio.Event()
+
+    async def long_sync():
+        started.set()
+        await asyncio.sleep(3600)
+    anna.start_job("sync", long_sync())
+    await started.wait()
+    job = next(iter(anna._tasks))
+    assert reg.remove(ANNA) == "Anna"
+    await asyncio.sleep(0)
+    assert (job.cancelled() or job.cancelling()) and not anna.jobs  # nothing keeps writing for someone who's gone
+    reg.owner.db.set("access_requests", {ANNA: {"name": "Anna", "at": "2026-10-27T10:00"}})
+    reg.approve(ANNA)
+    assert reg.others[ANNA] is anna  # one State, one SQLite connection per file

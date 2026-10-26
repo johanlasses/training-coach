@@ -60,8 +60,10 @@ class StravaClient:
             "approval_prompt": "force", "scope": SCOPES,
         })
 
-    async def exchange_code(self, pasted: str) -> dict:
-        """Accepts the full redirected URL (or just the code). Stores tokens, returns the athlete."""
+    async def exchange_code(self, pasted: str, refuse=None) -> dict:
+        """Accepts the full redirected URL (or just the code). Stores tokens, returns the athlete. `refuse(athlete)`
+        may return a reason not to keep this Strava account (raised as ValueError): it's asked before anything is
+        stored, so a refused sign-in leaves the connection that was there untouched."""
         q = parse_qs(urlparse(pasted.strip()).query)
         if "error" in q:
             raise ValueError(f"Strava returned an error: {q['error'][0]}")
@@ -74,14 +76,17 @@ class StravaClient:
             "code": code, "grant_type": "authorization_code",
         })
         if r.status_code == 403 and "limit" in r.text.lower():
-            # A new Strava API app connects 1 athlete (its owner) until Strava raises its capacity
-            raise ValueError("This Strava API app has reached its limit of connected athletes. Create your own free "
-                             "Strava API app and enter it under Settings → Strava API app, or use Garmin Connect.")
+            # A new Strava API app connects 1 athlete (its owner); its owner can raise that to 10 on strava.com/settings/api
+            raise ValueError("This Strava API app has reached its limit of connected athletes. Its owner can raise the "
+                             "athlete capacity (up to 10) on strava.com/settings/api. Or create your own free Strava "
+                             "API app and enter it under Settings → Strava API app, or use Garmin Connect.")
         if r.status_code >= 400:
             raise ValueError(f"Strava rejected the code ({r.status_code}). Codes are single-use — connect again.")
         data = r.json()
-        self.db.set("strava_token", {k: data[k] for k in ("access_token", "refresh_token", "expires_at")})
         athlete = data.get("athlete") or {}
+        if refuse and (reason := refuse(athlete)):
+            raise ValueError(reason)
+        self.db.set("strava_token", {k: data[k] for k in ("access_token", "refresh_token", "expires_at")})
         self.db.set("strava_athlete", {k: athlete.get(k) for k in ("id", "firstname", "lastname", "profile_medium")})
         return athlete
 

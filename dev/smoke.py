@@ -430,7 +430,8 @@ def mywhoosh() -> None:
         print("  skip Send to MyWhoosh: the latest plan has no indoor day")
     else:
         r = post(f"/plan/{plan['id']}/{day['date']}/mywhoosh")
-        check("on your calendar" in r.text and "at 20:00 and in My Workouts" in r.text,
+        # 20:00 on its day, or now when it's later than that (a late session)
+        check("on your calendar" in r.text and bool(re.search(r"at \d\d:\d\d and in My Workouts", r.text)),
               "Send to MyWhoosh reports success, on the calendar too", notice(r))
         post(f"/plan/{plan['id']}/{day['date']}/mywhoosh")  # sending the day again replaces it
         tasks = httpx.get(f"{MYWHOOSH}/_dev/tasks").json()
@@ -509,9 +510,16 @@ def multi_tenant() -> None:
     rhr = {r["metric"]: r["value"] for r in rows or []}.get("rhr")
     check(rhr == 62, f"dev2's health values are their own phone's (resting HR {rhr}, owner's is 52)")
     owner_rides = len(dbq("SELECT id FROM activities"))
-    r = web2.get(f"{STRAVA}/oauth/authorize", params={"redirect_uri": "http://localhost/strava-callback",
-                                                     "scope": "read,activity:read_all"}, follow_redirects=False)
-    r = web2.post("/settings/strava/connect", data={"redirect_url": r.headers["location"]})
+    def strava_sign_in():
+        r = web2.get(f"{STRAVA}/oauth/authorize", params={"redirect_uri": "http://localhost/strava-callback",
+                                                         "scope": "read,activity:read_all"}, follow_redirects=False)
+        return web2.post("/settings/strava/connect", data={"redirect_url": r.headers["location"]})
+    r = strava_sign_in()  # the owner still signed in to Strava on the phone (seen live 2026-10-27)
+    check("already connected for" in r.text and not dbq("SELECT 1 FROM kv WHERE key='strava_token' AND value != 'null'", db=db2),
+          "the owner's Strava account can't be connected for dev2 too (0.11.2)", notice(r))
+    httpx.post(f"{STRAVA}/_dev/athlete", params={"id": 2})
+    r = strava_sign_in()
+    httpx.post(f"{STRAVA}/_dev/athlete", params={"id": 1})
     check("Connected to Strava" in r.text, "dev2 connects their own Strava account", notice(r))
     wait(lambda: len(dbq("SELECT id FROM activities", db=db2)) >= 20, "dev2's first sync", 90)
     check(len(dbq("SELECT id FROM activities")) == owner_rides, "dev2's sync leaves the owner's rides alone")
@@ -523,6 +531,15 @@ def multi_tenant() -> None:
     check(bool(got), "dev2's ride feedback goes to Dev iPhone 2")
     sensors = [e for e in ha_states() if e.startswith("sensor.training_")]
     check(len(sensors) == 9, f"no extra MQTT sensors for dev2 ({len(sensors)} sensor.training_*)")
+    check(web2.post(f"/athletes/{uid}/reset", data={"activities": "on"}).status_code == 403, "dev2 can't reset anyone's data")
+    wait(lambda: "Syncing" not in web2.get("/").text, "dev2's sync to finish", 60)
+    owner_rides = len(dbq("SELECT id FROM activities"))
+    r = post(f"/athletes/{uid}/reset", activities="on", strava="on", confirm="Owner")
+    check("to confirm" in r.text and dbq("SELECT id FROM activities", db=db2), "a reset without dev2's name typed changes nothing")
+    r = post(f"/athletes/{uid}/reset", activities="on", strava="on", confirm="Dev Two")
+    check("Strava disconnected, synced activities removed" in r.text and not dbq("SELECT id FROM activities", db=db2)
+          and dbq("SELECT 1 FROM health_daily", db=db2), "the owner resets dev2's activities and Strava, health kept (0.11.2)", notice(r))
+    check(len(dbq("SELECT id FROM activities")) == owner_rides, "…and the owner's own rides are untouched")
     r = post(f"/athletes/{uid}/remove")
     check(web2.get("/").status_code == 403 and "no longer has access" in r.text, "the owner can remove dev2 again", notice(r))
 

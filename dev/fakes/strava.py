@@ -10,7 +10,7 @@ from fastapi.responses import JSONResponse, RedirectResponse
 
 app = FastAPI()
 HISTORY_DAYS = 60
-state = {"calls": 0, "fail_streams": set(), "rate_limit_next": 0, "extra": []}
+state = {"calls": 0, "fail_streams": set(), "rate_limit_next": 0, "extra": [], "athlete": 1}
 
 KINDS = [  # name, sport, minutes, base watts, blocks (start_frac, len_s, watts)
     ("Zwift - Endurance in Watopia", "VirtualRide", 60, 165, []),
@@ -98,9 +98,17 @@ async def token(request: Request):
     form = await request.form()
     if form.get("grant_type") == "authorization_code" and form.get("code") != "dev-code":
         return JSONResponse({"message": "Bad Request"}, status_code=400)
+    a = state["athlete"]  # who is "signed in to Strava" for the next authorisation (/_dev/athlete)
     return {"token_type": "Bearer", "access_token": f"dev-access-{int(time.time())}", "refresh_token": "dev-refresh",
             "expires_at": int(time.time()) + 6 * 3600,
-            "athlete": {"id": 1, "firstname": "Dev", "lastname": "Rider", "profile_medium": ""}}
+            "athlete": {"id": a, "firstname": "Dev", "lastname": "Rider" if a == 1 else f"Rider {a}", "profile_medium": ""}}
+
+
+@app.post("/_dev/athlete")
+def signed_in_as(id: int = 1):
+    """The Strava account the next sign-in authorises: 1 is the owner's, 2 another athlete's."""
+    state["athlete"] = id
+    return {"athlete": id}
 
 
 @app.get("/api/v3/athlete")
@@ -156,5 +164,5 @@ def fail(stream_404: int | None = None, rate_limit: int | None = None):
 
 @app.post("/_dev/reset")
 def reset():
-    state.update(calls=0, fail_streams=set(), rate_limit_next=0, extra=[])
+    state.update(calls=0, fail_streams=set(), rate_limit_next=0, extra=[], athlete=1)
     return {"ok": True}
