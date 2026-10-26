@@ -6,14 +6,11 @@
     <div class="page-head">
       <div>
         <h2>Analysis</h2>
-        {% if a %}<div class="muted">{{ a.coach | coach_name }} · {{ a.created_at[:16] | replace('T', ' ') }} · {{ a.kind }}</div>{% endif %}
+        {% if a %}<div class="muted one-line">{{ a.created_at[:10] }} {{ a.created_at[11:16] }} · {{ a.coach | coach_short }}</div>{% endif %}
       </div>
-      <form method="post" action="{{ base }}/analysis" class="coach-pick">
+      <form method="post" action="{{ base }}/analysis">
         {% set running = jobs.analysis and jobs.analysis.running %}
-        <select name="coach" aria-label="Coach">
-          {% for c in coaches.values() %}<option value="{{ c.key }}" {{ 'selected' if c.key == default_coach }}>{{ c.name }}</option>{% endfor %}
-        </select>
-        <button {{ 'disabled' if not ai_ok or running }}>{{ 'Analysing…' if running else 'Analyse now' }}</button>
+        <button {{ 'disabled' if not ai_ok or running }}>{{ 'Analysing…' if running else 'Analyse with ' ~ (default_coach | coach_short) }}</button>
       </form>
     </div>
     {% if not ai_ok %}<div class="notice error">Add your Claude API key in <a href="{{ base }}/settings">Settings</a> to enable analysis.</div>{% endif %}
@@ -21,7 +18,7 @@
       <div class="report">{{ html | safe }}</div>
       <p class="footnote">Written by {{ a.model }}</p>
     {% else %}
-      <div class="card"><p class="flush">No analysis yet. Pick a coach and run one.</p></div>
+      <div class="card"><p class="flush">No analysis yet. Run one: your coach reads your training and writes it up.</p></div>
     {% endif %}
   </section>
   <aside class="history">

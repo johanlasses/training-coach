@@ -33,9 +33,11 @@ There are three coaching styles, and you pick the default one on **Profile**:
 - **Carmichael (Time-Crunched)**: little time and high intensity, with 3–4 interval sessions a week.
 - **Next Level**: takes you from your current level to the next with classic periodisation.
 
-On **Plan** and **Analysis** you can run any coach, so you can compare them. Each coach's plan for a week has its own tab.
-The first plan generated for a week is the active one, and it drives today's session, the sensor and the morning
-notification. **Use this plan** switches it. Each coach's philosophy lives in `app/coaches/<name>.md`.
+**Plan** and **Analysis** work with your coach from Profile. Switch coach there and the Plan page shows that coach's
+plan for the week, or offers to make one. A week your coach didn't plan (an old one, say) shows the plan that was
+used, marked with who made it. The active plan drives today's session, the sensor and the morning notification;
+if your coach's plan isn't the active one yet, **Use this plan** makes it so. Each coach's philosophy lives in
+`app/coaches/<name>.md`.
 
 The first sync imports 12 months of rides. Power detail (NP, power curve, zones) is fetched gradually so the rate
 limits aren't hit, which can take a few hours.
@@ -45,13 +47,15 @@ limits aren't hit, which can take a few hours.
 **Overview** opens with your status. A row of small gauges comes first:
 - **Form**: TSB, coloured by the same bands the planner uses.
 - **Week**: TSS done against the plan. The tick marks where you'd be if you'd ridden every session up to today.
+- **Sessions**: sessions done of those planned this week, and how many were missed.
+- **Fitness**: your CTL over the last six weeks as a small line, with today's CTL, your FTP and the 4-week change.
 - **HRV** and **Sleep**, or resting HR when there's no sleep data: your last 7 days against your own 28-day
   baseline, coloured by the same readiness thresholds the coach plans with. They show once there's enough data
   (5 days in the last week, 14 in the baseline).
 
-Below the gauges: this week's sessions and the next one, fitness over the last 4 weeks (CTL and FTP change), and
-the countdown to the next event you told the coach about, with where CTL lands by then at the current ramp. Below it is your latest ride, then the five before it.
-Older rides and the charts come after that.
+Below the gauges: your **next session** (when, how long, and what it's for in one sentence; tap it for the Plan)
+and the countdown to the **next event** you told the coach about, with where CTL lands by then at the current ramp.
+Then **Rides**: the latest first, with the coach's feedback, then the ones before it. The charts come after that.
 
 Rides with power are drawn like the planned sessions: blocks coloured by zone. When the ride was a planned Zwift
 workout, the planned profile sits under it on the same time axis and power scale, so a faded rep shows.

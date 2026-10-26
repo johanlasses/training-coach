@@ -2,27 +2,21 @@
 {% from "_macros.html" import status_pill %}
 {% set page = 'plan' %}
 {% block content %}
-<div class="page-head">
-  <a class="btn secondary" href="{{ base }}/plan?week={{ prev.isoformat() }}">←</a>
-  <h2>Week of {{ week.strftime('%-d %b %Y') }}</h2>
-  <a class="btn secondary" href="{{ base }}/plan?week={{ next.isoformat() }}">→</a>
-  <form method="post" action="{{ base }}/plan?week={{ week.isoformat() }}">
-    <input type="hidden" name="coach" value="{{ coach }}">
+<div class="plan-head">
+  {#- a div, not <nav>: the site menu's phone rules target nav -#}
+  <div class="week-nav" role="navigation" aria-label="Week">
+    <a class="btn secondary" href="{{ base }}/plan?week={{ prev.isoformat() }}" aria-label="Previous week">←</a>
+    <h2>Week of {{ week.strftime('%-d %b') }}</h2>
+    <a class="btn secondary" href="{{ base }}/plan?week={{ next.isoformat() }}" aria-label="Next week">→</a>
+  </div>
+  <form method="post" action="{{ base }}/plan?week={{ week.isoformat() }}" class="plan-action">
     {% set planning = jobs.plan and jobs.plan.running %}
     <button {{ 'disabled' if not ai_ok or planning or needs_profile }}>
-      {% if planning %}Coach is planning…{% elif plan %}Re-plan remaining days{% else %}Generate with {{ coach | coach_name }}{% endif %}</button>
+      {% if planning %}{{ coach | coach_short }} is planning…{% elif plan and plan.coach == coach %}Re-plan remaining days{% else %}Plan with {{ coach | coach_short }}{% endif %}</button>
   </form>
 </div>
 {% if needs_profile %}<div class="notice">Welcome! <a href="{{ base }}/profile">Fill in your Profile</a> first: your training days, hours per
   session and goals. The coach plans around them.</div>{% endif %}
-
-<nav class="tabs" aria-label="Coach">
-  {% for k in tabs %}
-  <a href="{{ base }}/plan?week={{ week.isoformat() }}&coach={{ k }}" class="{{ 'active' if k == coach }} {{ 'empty' if not plans[k] }}"
-     {%- if plans[k] and plans[k].id == active_id %} title="Active plan"{% endif %}>{{ k | coach_short }}
-    {%- if plans[k] and plans[k].id == active_id %} ✓{% endif %}</a>
-  {% endfor %}
-</nav>
 
 {% if not ai_ok %}<div class="notice error">Add your Claude API key in <a href="{{ base }}/settings">Settings</a> to enable the coach.</div>{% endif %}
 
@@ -35,8 +29,12 @@
     <form method="post" action="{{ base }}/plan/{{ plan.id }}/activate"><button class="secondary">Use this plan</button></form>
     {% endif %}
   </div>
-  <p class="caption">{{ plan.coach | coach_name }}{{ ' · active plan' if plan.id == active_id }} · Block week {{ p.block_week }} of 4{{ ' · recovery' if p.block_week == 4 }} ·
-    planned TSS {{ p.days | sum(attribute='target_tss') }} · generated {{ plan.created_at | replace('T', ' ') }}</p>
+  <p class="caption">{% if plan.coach != coach %}Planned by {{ plan.coach | coach_name }} · {% endif %}Block week {{ p.block_week }} of 4{{ ' · recovery' if p.block_week == 4 }} ·
+    TSS {{ p.days | sum(attribute='target_tss') }}</p>
+  {% if active_id and plan.id != active_id %}
+  <p class="notice in-card">This week runs on {{ active_coach | coach_name }}'s plan: today's session and notifications
+    come from it. <b>Use this plan</b> switches to this one.</p>
+  {% endif %}
   <p class="flush">{{ p.rationale }}</p>
   {% if plan.warnings %}
   <div class="notice error in-card"><b>The plan still breaks some rules — use judgement:</b>
@@ -109,8 +107,7 @@
 {% endfor %}
 </div>
 {% else %}
-<div class="card"><p class="flush">No plan from {{ coach | coach_name }} for this week yet.
-  {% if ai_ok %}Generate one: the coach plans from today through Sunday from your goals, load, power curve, the season and your availability.{% endif %}
-  {% if plans %}The first plan you generate for a week is the active one, and it drives today's session and notifications. Switch with “Use this plan”.{% endif %}</p></div>
+<div class="card"><p class="flush">No plan for this week yet.
+  {% if ai_ok %}{{ coach | coach_name }} plans from today through Sunday from your goals, load, power curve, the season and your availability.{% endif %}</p></div>
 {% endif %}
 {% endblock %}

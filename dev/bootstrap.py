@@ -183,9 +183,11 @@ def iphone(h: dict, n: int = 1) -> str:
 
 
 def push_health(wid: str, offset: float = 0) -> None:
-    """`offset` sets Dev iPhone 2's values apart, so a mix-up between the athletes shows."""
-    webhook(wid, "update_sensor_states", [{"type": "sensor", "unique_id": uid, "state": state + offset, "icon": icon}
-                                          for uid, (_, state, _, icon) in SENSORS.items()]).raise_for_status()
+    """`offset` sets Dev iPhone 2's values apart, so a mix-up between the athletes shows. HA's mobile_app doesn't bump
+    last_reported for an unchanged value, so each value goes in twice: nudged, then the real one (a new reading)."""
+    for nudge in (0.01, 0):
+        webhook(wid, "update_sensor_states", [{"type": "sensor", "unique_id": uid, "state": state + offset + nudge, "icon": icon}
+                                              for uid, (_, state, _, icon) in SENSORS.items()]).raise_for_status()
 
 
 if __name__ == "__main__":

@@ -4,27 +4,23 @@
 {% block content %}
 {% set w, t, ev = status.week, status.trend, status.event %}
 <section class="card status-card">
-  <div class="gauges">{% for g in gauges %}{{ gauge(g) }}{% endfor %}</div>
-  <div class="status-grid">
+  <div class="gauges{{ ' wrap' if gauges | length > 4 }}">{% for g in gauges %}{{ gauge(g) }}{% endfor %}</div>
+  <div class="status-grid two">
     <div class="stat">
-      <div class="label">This week</div>
-      {% if w.plan %}
-      <div class="value">{{ w.done }}<small>/{{ w.sessions }} sessions</small></div>
-      {% if w.missed %}<div class="sub">{{ w.missed }} missed</div>{% endif %}
-      {% if w.partial %}<div class="sub">{{ w.partial }} partly done</div>{% endif %}
-      {% if w.next %}<a class="next" href="{{ base }}/plan">{{ 'Today' if w.next_is_today else w.next.date | day_label }}: <b>{{ w.next.title }}</b> · {{ w.next.duration_min }} min</a>
-      {% else %}<div class="sub">The plan for this week is done.</div>{% endif %}
+      <div class="label">Next session</div>
+      {% if w.plan and w.next %}{% set n = w.next %}
+      <a class="next-session" href="{{ base }}/plan">
+        <div class="value-line"><b>{{ n.title }}</b></div>
+        <div class="sub">{{ 'Today' if w.next_is_today else n.date | day_label }} · {{ n.duration_min }} min ·
+          {{ {'zwift': 'Zwift', 'outdoor': 'Outdoor'}.get(n.kind, n.kind) }} · {{ n.intensity }}</div>
+        {% if n.description %}<div class="sub summary">{{ n.description | first_sentence }}</div>{% endif %}
+      </a>
+      {% elif w.plan %}
+      <div class="sub">The plan for this week is done. Enjoy the rest.</div>
       {% else %}
-      <div class="value">{{ w.rides }}<small> rides</small></div>
-      <div class="sub">TSS {{ w.tss_done }}. No plan this week.</div>
+      <div class="sub">No plan this week.</div>
       <a class="next" href="{{ base }}/plan">Plan the week →</a>
       {% endif %}
-    </div>
-    <div class="stat">
-      <div class="label">Fitness</div>
-      <div class="value">{{ t.ctl }} <small>CTL</small> <span class="delta {{ 'up' if t.ctl_change > 0 else 'down' if t.ctl_change < 0 }}">{{ '↑' if t.ctl_change > 0 else '↓' if t.ctl_change < 0 else '→' }} {{ '%+.1f' % t.ctl_change }}</span></div>
-      <div class="sub">over 4 weeks, {{ '%+.1f' % t.ctl_ramp }} a week</div>
-      <div class="sub">FTP {{ t.ftp }} W{% if t.ftp_change %} ({{ '%+d' % t.ftp_change }} in 6 weeks){% endif %} · {{ t.wkg }} W/kg</div>
     </div>
     <div class="stat">
       <div class="label">Next event</div>
@@ -42,10 +38,10 @@
 
 <div class="layout home">
   <section class="rides">
+    <h2 class="section-title">Rides</h2>
     {% if latest %}
       {{ ride_card(latest, planned.get(latest.start_date_local[:10]), latest=True) }}
       {% if not latest.feedback and feedback_running %}<p class="muted">The coach is writing feedback on this ride…</p>{% endif %}
-      {% if feed %}<h2 class="section-title">Recent rides</h2>{% endif %}
       {% for a in feed[:5] %}{{ ride_card(a, planned.get(a.start_date_local[:10])) }}{% endfor %}
       {% if feed | length > 5 %}
       <details class="more-rides"><summary>Older rides ({{ feed | length - 5 }})</summary>

@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.9.1 (2026-10-26)
+
+- **A tighter Overview.** Two more gauges: **Sessions** (done of planned this week) and **Fitness** (your CTL over
+  six weeks as a small line, with your FTP). Under them, your **next session** with a one-line summary of what it's
+  for, and the next event. Your rides are one list now, the latest on top.
+- **Plan shows your coach's plan**, no more coach tabs. Switch coach on Profile and Plan follows. A week your coach
+  didn't plan shows the plan that was used, with who made it. A plan you make or re-plan here is the one your week
+  runs on (today's session, notifications, sensors). The week and its arrows sit on one row, with the plan button
+  below them on the phone.
+- **Analysis runs with your coach** from Profile, and the date fits on one line.
+
 ## 0.9.0 (2026-10-26)
 
 - **Garmin Connect as a source.** Your rides, your health data, or both can now come straight from Garmin, through

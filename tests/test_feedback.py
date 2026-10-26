@@ -206,8 +206,9 @@ def test_home_shows_status_latest_ride_and_its_feedback(tmp_path, monkeypatch):
         db.update_activity(a["id"], feedback=FB | {"coach": "nextlevel", "model": "claude-haiku-5-5", "at": "2026-10-16T09:00:00"})
         plan_today(db, today)
         html = c.get("/").text
-        assert "status-card" in html and "This week" in html and "Next event" in html
-        assert "Latest ride" in html and "Sweet spot nailed" in html and "All three reps on target" in html
+        assert "status-card" in html and "Next session" in html and "Next event" in html
+        assert 'aria-label="Sessions:' in html and 'aria-label="Fitness:' in html
+        assert ">Rides<" in html and "Sweet spot nailed" in html and "All three reps on target" in html
         assert "Planned: Sweet spot 3×10" in html
         page = c.get(f"/activity/{a['id']}").text
         assert "Sweet spot nailed" in page and "Power by zone" in page

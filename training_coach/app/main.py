@@ -237,8 +237,12 @@ class State:
     async def do_chat(self) -> None:
         await chat.respond(self.db, self.cfg, self.snapshot(), date.today())
 
-    async def do_plan(self, week_start: date, coach_key: str) -> None:
-        await coach_mod.generate_plan(self.db, self.cfg, self.snapshot(), week_start, date.today(), coach_key)
+    async def do_plan(self, week_start: date, coach_key: str, activate: bool = False) -> None:
+        """`activate`: the new plan runs the week (the Plan page's button: it shows one plan, the athlete's coach's,
+        so the plan they just made must be the one Overview, notifications and the sensor follow)."""
+        plan_id = await coach_mod.generate_plan(self.db, self.cfg, self.snapshot(), week_start, date.today(), coach_key)
+        if activate and plan_id:
+            self.db.set_active_plan(week_start.isoformat(), plan_id)
         await self.publish()
 
     async def do_analysis(self, coach_key: str) -> None:
@@ -528,6 +532,7 @@ templates.env.globals["coaches"] = coaches.COACHES
 templates.env.globals["ride_profiles"] = workouts.ride_profiles
 templates.env.filters["coach_name"] = coaches.name_of
 templates.env.filters["coach_short"] = coaches.short_name_of
+templates.env.filters["first_sentence"] = overview.first_sentence
 
 
 def base(request: Request) -> str:
@@ -566,7 +571,7 @@ async def home(request: Request):
     feed = acts[:20]
     status = overview.status(st.db, st.cfg, acts, today, d)
     ready = health.readiness(health.summary(st.db, today)) if health.enabled(st.cfg) else None
-    return render(request, "home.html", d=d, status=status, gauges=overview.gauges(status, ready),
+    return render(request, "home.html", d=d, status=status, gauges=overview.gauges(status, ready, d["fitness"]),
                   latest=feed[0] if feed else None, feed=feed[1:], planned=planned_by_date(st.db, feed),
                   feedback_running=(st.jobs.get("feedback") or {}).get("running"))
 
@@ -604,15 +609,16 @@ async def plan_week_view(request: Request, week: str):
 
 
 @app.get("/plan")
-async def plan_view(request: Request, week: str | None = None, coach: str | None = None):
+async def plan_view(request: Request, week: str | None = None):
+    """The week planned by the athlete's coach (Profile); a week that coach didn't plan shows its active plan, from
+    whoever made it, so a past week is never empty."""
     st = athlete(request)
     today = date.today()
     ws = date.fromisoformat(week) if week else stats.week_start(today)
     plans = {k or "": p for k, p in st.db.week_plans(ws.isoformat()).items()}
     active = st.db.active_plan(ws.isoformat())
-    if coach not in plans and coach not in coaches.COACHES:
-        coach = (active["coach"] or "") if active else st.cfg.default_coach
-    plan = plans.get(coach)
+    coach = coaches.get(st.cfg.default_coach).key
+    plan = plans.get(coach) or active
     acts = st.db.activities(since_local=ws.isoformat())
     by_day: dict[str, list] = {}
     for a in acts:
@@ -624,8 +630,7 @@ async def plan_view(request: Request, week: str | None = None, coach: str | None
             results = [r for a in by_day.get(d["date"], []) if (r := ftptest.estimate(d.get("test_protocol", "none"), a.get("mmp")))]
             if results:
                 tests[d["date"]] = max(results)
-    tabs = list(coaches.COACHES) + ([""] if "" in plans else [])
-    return render(request, "plan.html", plan=plan, plans=plans, coach=coach, tabs=tabs,
+    return render(request, "plan.html", plan=plan, coach=coach, active_coach=active["coach"] if active else None,
                   active_id=active["id"] if active else None, week=ws, prev=ws - timedelta(days=7),
                   next=ws + timedelta(days=7), today=today.isoformat(), status=status, by_day=by_day, tests=tests,
                   applied_tests={t["date"] for t in st.cfg.ftp_tests}, needs_profile=needs_profile(st),
@@ -665,7 +670,7 @@ async def zwift_upload(request: Request, plan_id: int, day: str):
         st.db.set("zwift_uploads", uploads)
         st.flash = ("ok", f"“{d['title']}” is in your Zwift account. Restart Zwift, then find it under "
                           "Workouts → Custom Workouts → Training Coach.")
-    return back(request, f"/plan?week={plan['week_start']}&coach={plan['coach'] or ''}")
+    return back(request, f"/plan?week={plan['week_start']}")
 
 
 @app.get("/analysis")
@@ -700,9 +705,8 @@ async def plan_now(request: Request, week: str | None = None):
     if needs_profile(st):
         st.flash = ("error", "Fill in your Profile first: the coach plans around your days, hours and goals.")
         return back(request, f"/plan?week={ws.isoformat()}")
-    key = coaches.get((await request.form()).get("coach") or st.cfg.default_coach).key
-    st.start_job("plan", st.do_plan(ws, key))
-    return back(request, f"/plan?week={ws.isoformat()}&coach={key}")
+    st.start_job("plan", st.do_plan(ws, coaches.get(st.cfg.default_coach).key, activate=True))  # the athlete's coach plans
+    return back(request, f"/plan?week={ws.isoformat()}")
 
 
 @app.post("/plan/{plan_id}/activate")
@@ -713,7 +717,7 @@ async def plan_activate(request: Request, plan_id: int):
         raise HTTPException(404)
     st.db.set_active_plan(plan["week_start"], plan_id)
     st.start_job("publish", st.publish())  # MQTT round-trip: don't hold the redirect
-    return back(request, f"/plan?week={plan['week_start']}&coach={plan['coach'] or ''}")
+    return back(request, f"/plan?week={plan['week_start']}")
 
 
 @app.get("/coach")
@@ -829,7 +833,7 @@ async def ftp_test_delete(request: Request, date_: str = Query(alias="date")):
 @app.post("/analysis")
 async def analysis_now(request: Request):
     st = athlete(request)
-    st.start_job("analysis", st.do_analysis(coaches.get((await request.form()).get("coach") or st.cfg.default_coach).key))
+    st.start_job("analysis", st.do_analysis(coaches.get(st.cfg.default_coach).key))  # the athlete's coach (Profile)
     return back(request, "/analysis")
 
 

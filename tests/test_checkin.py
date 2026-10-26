@@ -280,8 +280,19 @@ def test_unread_checkin_dot_until_the_coach_page_is_opened(client):
 
 def test_gauges():
     status = {"tsb": -12, "form": "Productive training", "form_colour": "good",
-              "week": {"plan": True, "tss_done": 150, "tss_planned": 300, "tss_planned_to_date": 200}}
-    form, week = overview.gauges(status, None)
+              "week": {"plan": True, "tss_done": 150, "tss_planned": 300, "tss_planned_to_date": 200, "sessions": 4,
+                       "done": 2, "missed": 1, "partial": 0},
+              "trend": {"ctl": 37, "ctl_change": 4.2, "ftp": 248}}
+    form, week, sessions = overview.gauges(status, None)
+    assert (sessions["text"], sessions["sub"], sessions["fill"] is not None) == ("2/4", "1 missed", True)
+    fitness = [{"ctl": 30 + i / 10} for i in range(60)]
+    fit = overview.gauges(status, None, fitness)[3]
+    assert (fit["label"], fit["text"], fit["sub"], fit["colour"]) == ("Fitness", "37", "FTP 248 · ↑4", "good")
+    assert len(fit["line"].split()) == 42  # the last six weeks
+    flat = overview.gauges(status | {"trend": {"ctl": 37, "ctl_change": 0.4, "ftp": 248}}, None, fitness)[3]
+    assert flat["sub"] == "FTP 248 · →0"  # not "↑0"
+    assert overview.first_sentence("Steady Z2. Keep cadence high.") == "Steady Z2."
+    assert overview.first_sentence("x " * 200).endswith("…") and len(overview.first_sentence("x " * 200)) <= 140
     assert (form["label"], form["text"], form["colour"]) == ("Form", "-12", "good") and len(form["bands"]) == 5
     assert form["marker"] and not form["fill"]
     assert (week["text"], week["sub"]) == ("50%", "TSS 150/300") and week["fill"] and week["tick"]
@@ -295,13 +306,13 @@ def test_gauges():
     assert (g[1]["text"], g[1]["colour"]) == ("-10%", "critical")  # the signal, not the band edge
     sleep = {"sleep": {"mean_7d": 7.4, "baseline_mean": 7.0, "signal": False}}
     g = overview.gauges(status, ready | sleep)
-    assert [x["label"] for x in g] == ["Form", "Week", "HRV", "Sleep"] and g[3]["colour"] == "good"
+    assert [x["label"] for x in g] == ["Form", "Week", "Sessions", "HRV", "Sleep"] and g[4]["colour"] == "good"
     # A resting HR signal is never hidden behind a fine sleep gauge
     g = overview.gauges(status, {"hrv": {"change_pct": 2, "signal": False}, "rhr": {"change": 5, "signal": True}} | sleep)
-    assert [x["label"] for x in g] == ["Form", "Week", "Resting HR", "HRV"] and g[2]["colour"] == "critical"
+    assert [x["label"] for x in g] == ["Form", "Week", "Sessions", "Resting HR", "HRV"] and g[3]["colour"] == "critical"
     # An HRV jump under heavy load is amber, not fresh
     g = overview.gauges(status | {"tsb": -30}, {"hrv": {"change_pct": 15, "signal": False}})
-    assert (g[2]["colour"], g[2]["sub"]) == ("warning", "high under load")
+    assert (g[3]["colour"], g[3]["sub"]) == ("warning", "high under load")
 
 
 def test_week_tick_counts_today_only_once_ridden(db):

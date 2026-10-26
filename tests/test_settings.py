@@ -96,18 +96,46 @@ def test_goals_level_sessions_and_coach(client):
     assert 'value="pogacar" checked' in html and "Climb faster" in html
 
 
-def test_plan_tabs_and_activate(client):
-    db = main.app.state.st.db
+def test_plan_page_shows_the_athletes_coach(client):
+    st = main.app.state.st
+    db = st.db
     ws = main.stats.week_start(main.date.today()).isoformat()
     first = db.save_plan(ws, "t1", "m", {"week_focus": "Base", "rationale": "", "block_week": 1, "days": []}, [], "pogacar")
-    second = db.save_plan(ws, "t2", "m", {"week_focus": "Crunch", "rationale": "", "block_week": 1, "days": []}, [], "carmichael")
+    # The athlete's coach (Next Level) has no plan this week: the active one shows, marked as someone else's
     html = client.get("/plan").text
-    assert "Base" in html and "Next Level" in html  # active plan's tab is shown, all coaches listed
-    html = client.get("/plan?coach=carmichael").text
-    assert "Crunch" in html and f"/plan/{second}/activate" in html
+    assert "Base" in html and "Planned by Pogačar" in html and "Plan with Next Level" in html
+    assert 'class="tabs"' not in html and "?coach=" not in html  # no coach tabs any more
+    st.cfg.default_coach = "carmichael"
+    second = db.save_plan(ws, "t2", "m", {"week_focus": "Crunch", "rationale": "", "block_week": 1, "days": []}, [], "carmichael")
+    html = client.get("/plan").text  # switching coach on Profile shows that coach's plan
+    assert "Crunch" in html and "Re-plan remaining days" in html and "Planned by" not in html
+    assert f"/plan/{second}/activate" in html  # it isn't the active one yet (Base came first)
+    assert "This week runs on Pogačar (San Millán)'s plan" in html  # and the page says so
     client.post(f"/plan/{second}/activate")
-    assert db.active_plan(ws)["id"] == second
-    assert f"/plan/{first}/activate" in client.get("/plan?coach=pogacar").text
+    html = client.get("/plan").text
+    assert db.active_plan(ws)["id"] == second and f"/plan/{first}/activate" not in html and "This week runs on" not in html
+
+
+async def test_a_plan_made_on_the_plan_page_runs_the_week(client, monkeypatch):
+    st = main.app.state.st
+    ws = main.stats.week_start(main.date.today())
+    first = st.db.save_plan(ws.isoformat(), "t1", "m", {"week_focus": "Old", "rationale": "", "block_week": 1, "days": []}, [], "pogacar")
+
+    async def generate(db, cfg, snapshot, week_start, today, coach_key):
+        return db.save_plan(week_start.isoformat(), "t2", "m", {"week_focus": "New", "rationale": "", "block_week": 1,
+                                                                 "days": []}, [], coach_key)
+
+    async def noop(*a, **k):
+        return None
+
+    monkeypatch.setattr(main.coach_mod, "generate_plan", generate)
+    monkeypatch.setattr(st, "publish", noop)
+    focus = lambda: st.db.active_plan(ws.isoformat())["payload"]["week_focus"]  # noqa: E731
+    assert focus() == "Old" and first  # the first plan of a week is the active one
+    await st.do_plan(ws, "carmichael", activate=True)  # what the Plan page's button runs
+    assert focus() == "New"
+    await st.do_plan(ws, "pogacar")  # without activate (auto-plan only plans weeks with no plan yet)
+    assert focus() == "New"
 
 
 def test_scheduler_never_starts_llm_jobs(client, monkeypatch):

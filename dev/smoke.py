@@ -276,6 +276,9 @@ def plan_and_modes() -> None:
     if latest:
         check(json.loads(latest["warnings"] or "[]") == [], "the fake plan passes every validation rule", latest["warnings"])
     check("Endurance spin" in page("/plan") or "Rest" in page("/plan"), "Plan page renders it")
+    plan_html = page("/plan")
+    check("Re-plan remaining days" in plan_html and "?coach=" not in plan_html and 'class="week-nav"' in plan_html,
+          "Plan shows the athlete's coach's plan, no coach tabs (0.9.1)")
 
     httpx.post(f"{ANTHROPIC}/_dev/mode", params={"mode": "invalid-plan"})
     calls = len(dbq("SELECT id FROM llm_calls WHERE purpose='plan'"))

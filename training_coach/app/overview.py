@@ -155,8 +155,35 @@ def gauge(value: float, lo: float, hi: float, bands: list[tuple], text: str, lab
     return g
 
 
-def gauges(st: dict, ready: dict | None) -> list[dict]:
-    """The status card's gauges: form, the week against the plan, and HRV and sleep (or RHR) when they're trustworthy."""
+def spark(values: list[float], top: float = 8, bottom: float = 38) -> str:
+    """SVG polyline points for a small trend line inside the gauge's 100-wide box."""
+    if len(values) < 2:
+        return ""
+    lo, hi = min(values), max(values)
+    span = (hi - lo) or 1
+    step = 92 / (len(values) - 1)
+    return " ".join(f"{4 + i * step:.1f},{bottom - (v - lo) / span * (bottom - top):.1f}" for i, v in enumerate(values))
+
+
+def fitness_gauge(t: dict, fitness: list[dict], days: int = 42) -> dict:
+    """Not an arc: CTL over the last six weeks as a small line, with today's CTL and the 4-week change."""
+    change = t["ctl_change"]
+    return {"label": "Fitness", "text": str(t["ctl"]), "line": spark([f["ctl"] for f in fitness[-days:]]),
+            "colour": "good" if change > 0 else "critical" if change < -2 else "text-muted",
+            "sub": f"FTP {t['ftp']} · {'↑' if round(change) > 0 else '↓' if round(change) < 0 else '→'}{abs(round(change))}"}
+
+
+def first_sentence(text: str, limit: int = 140) -> str:
+    """The session description's first sentence, for the Overview's next-session line."""
+    text = " ".join((text or "").split())
+    m = re.search(r"[.!?](\s|$)", text)
+    s = text[:m.end()].strip() if m else text
+    return s if len(s) <= limit else s[:limit - 1].rsplit(" ", 1)[0] + "…"
+
+
+def gauges(st: dict, ready: dict | None, fitness: list[dict] | None = None) -> list[dict]:
+    """The status card's gauges: form, the week's TSS and sessions against the plan, fitness, and HRV and sleep (or
+    RHR) when they're trustworthy."""
     out = [gauge(st["tsb"], -40, 30, FORM_BANDS, f"{st['tsb']:+d}", "Form", st["form"], colour=st["form_colour"])]
     w = st["week"]
     if w["plan"] and w["tss_planned"]:
@@ -164,6 +191,12 @@ def gauges(st: dict, ready: dict | None) -> list[dict]:
         out.append(gauge(min(pct, 120), 0, 120, [(0, 120, "series-1")], f"{pct}%", "Week",
                          f"TSS {w['tss_done']}/{w['tss_planned']}", fill=True,
                          tick=w["tss_planned_to_date"] / w["tss_planned"] * 100))
+    if w["plan"] and w["sessions"]:
+        sub = f"{w['missed']} missed" if w["missed"] else f"{w['partial']} partly" if w["partial"] else "on track"
+        out.append(gauge(w["done"], 0, w["sessions"], [(0, w["sessions"], "good")], f"{w['done']}/{w['sessions']}",
+                         "Sessions", sub, fill=True))
+    if fitness:
+        out.append(fitness_gauge(st["trend"], fitness))
     health_gauges = []
     if h := (ready or {}).get("hrv"):
         # A sharp HRV rise under heavy load isn't freshness (the planner's rule): amber, not grey or green
