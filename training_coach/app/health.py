@@ -5,8 +5,11 @@ Garmin (fetch_garmin): daily values straight from Garmin Connect, per calendar d
 
 Apple Health (fetch): read from the HA iOS companion app's sensors. The app pushes HealthKit samples to HA as sensor states. Their timestamps are the push time, not the sample
 time (home-assistant/iOS#5670), so a reading is filed under the day the phone reported it. A state the phone
-didn't report today is yesterday's number, and isn't stored again. For HRV the first reading of the day is kept: Apple's
-spot SDNN taken after a ride reads low, so the overnight/morning value is the useful one.
+didn't report today is yesterday's number, and isn't stored again. But HA doesn't bump last_reported when the phone sends
+the same value again (seen in the dev stack, Oct 2026), so a resting HR equal to yesterday's would look unreported: when
+the phone did report something else today, a whole-number metric unchanged for at most REPEAT_DAYS counts as a repeat
+(CARRY). For HRV the first reading of the day is kept: Apple's spot SDNN taken after a ride reads low, so the
+overnight/morning value is the useful one (HRV has decimals, so it never repeats and is never carried).
 """
 from __future__ import annotations
 
@@ -82,19 +85,42 @@ async def fetch_garmin(db: DB, garmin, today: date) -> int:
     return n
 
 
+CARRY = {"rhr", "weight", "vo2max"}  # whole numbers that repeat day to day; a carried resting HR is overwritten later
+REPEAT_DAYS = 3                      # an unchanged value older than this is a sensor that stopped, not a repeat
+
+
+async def phone_reported_today(states: dict[str, dict | None], today: date) -> bool:
+    """The phone sent something today: one of the health sensors, else its battery level (which changes all day)."""
+    if any(s and changed_on(s) == today for s in states.values()):
+        return True
+    prefixes = {e.removesuffix("_" + SENSOR_KEYS[m]) for e in states if (m := metric_of(e))}
+    for p in sorted(prefixes):
+        if (s := await ha.state(f"{p}_battery_level")) and changed_on(s) == today:
+            return True
+    return False
+
+
 async def fetch(db: DB, cfg: Config, today: date) -> int:
     """Reads every configured sensor and stores today's value. Returns how many were stored."""
     stored, skipped = [], []
+    by_entity = {e: await ha.state(e) for e in entities(cfg).values()}
+    alive: bool | None = None  # asked only when a value looks unreported
     for metric, entity in entities(cfg).items():
-        s = await ha.state(entity)
+        s = by_entity[entity]
         try:
             raw = float(s["state"]) if s else None
         except (TypeError, ValueError):  # "unknown", "unavailable"
             raw = None
         value = normalise(metric, raw, (s or {}).get("attributes", {}).get("unit_of_measurement", "")) if raw is not None else None
-        if value is not None and value > 0 and changed_on(s) == today:
+        on = changed_on(s) if s else None
+        repeat = False
+        if value is not None and value > 0 and on != today and metric in CARRY and on and today - on <= timedelta(days=REPEAT_DAYS):
+            if alive is None:
+                alive = await phone_reported_today(by_entity, today)
+            repeat = alive
+        if value is not None and value > 0 and (on == today or repeat):
             db.set_health(today.isoformat(), metric, round(value, 2), METRICS[metric][1], keep_first=metric == "hrv")
-            stored.append(f"{metric} {value:g}")
+            stored.append(f"{metric} {value:g}" + (f" (unchanged since {on:%-d %b})" if repeat else ""))
         else:
             unit = (s or {}).get("attributes", {}).get("unit_of_measurement", "")
             skipped.append(f"{metric} (" + ("no value" if raw is None or (value is not None and value <= 0) else

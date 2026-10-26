@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.9.2 (2026-10-26)
+
+- **Apple Health no longer loses days.** When your resting heart rate (or weight) was the same as the day before,
+  Home Assistant didn't mark it as new, so the add-on skipped that day as "not reported". The recovery trends then
+  had fewer days than they should, and the gauges and check-in could lose them. Now, when your phone has sent
+  anything today (another health value, or just its battery level), an unchanged value counts for today. HRV isn't
+  affected: it has decimals and never repeats. Garmin wasn't affected.
+
 ## 0.9.1 (2026-10-26)
 
 - **A tighter Overview.** Two more gauges: **Sessions** (done of planned this week) and **Fitness** (your CTL over

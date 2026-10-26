@@ -48,17 +48,55 @@ async def test_fetch_stores_normalised_values(tmp_path, ha_up):
 async def test_stale_states_are_skipped_and_morning_hrv_is_kept(tmp_path, ha_up):
     db = DB(tmp_path / "t.db")
     cfg = Config(health_rhr_entity="sensor.rhr", health_hrv_entity="sensor.hrv")
-    respx.get(f"{HA}/api/states/sensor.rhr").respond(json=st("x", "55", "bpm", changed="2026-10-14T06:00:00+00:00"))
+    yesterday = "2026-10-14T06:00:00+00:00"
+    respx.get(f"{HA}/api/states/sensor.rhr").respond(json=st("x", "55", "bpm", changed=yesterday))
+    respx.get(f"{HA}/api/states/sensor.hrv").respond(json=st("x", "62", "ms", changed=yesterday))
+    assert await health.fetch(db, cfg, TODAY) == 0  # nothing from the phone today: both are yesterday's numbers
     respx.get(f"{HA}/api/states/sensor.hrv").respond(json=st("x", "62", "ms"))
-    assert await health.fetch(db, cfg, TODAY) == 1  # resting HR is yesterday's number
+    respx.get(f"{HA}/api/states/sensor.rhr").respond(json=st("x", "56", "bpm"))
+    await health.fetch(db, cfg, TODAY)
     respx.get(f"{HA}/api/states/sensor.hrv").respond(json=st("x", "41", "ms", changed="2026-10-15T15:30:00+00:00"))
     await health.fetch(db, cfg, TODAY)
-    assert [(r["metric"], r["value"]) for r in db.health(TODAY.isoformat())] == [("hrv", 62)]
+    assert [(r["metric"], r["value"]) for r in db.health(TODAY.isoformat())] == [("hrv", 62), ("rhr", 56)]  # morning HRV
     # The same resting HR as yesterday, reported again this morning, still counts for today
     same = st("x", "55", "bpm", changed="2026-10-14T06:00:00+00:00") | {"last_reported": "2026-10-15T06:00:00+00:00"}
     respx.get(f"{HA}/api/states/sensor.rhr").respond(json=same)
     await health.fetch(db, cfg, TODAY)
     assert ("rhr", 55) in [(r["metric"], r["value"]) for r in db.health(TODAY.isoformat())]
+
+
+@respx.mock
+async def test_an_unchanged_resting_hr_counts_when_the_phone_reported_today(tmp_path, ha_up):
+    """HA doesn't bump last_reported for an unchanged value: a resting HR equal to yesterday's mustn't lose the day."""
+    db = DB(tmp_path / "t.db")
+    cfg = Config(health_rhr_entity="sensor.johan_iphone_resting_heart_rate",
+                 health_hrv_entity="sensor.johan_iphone_heart_rate_variability",
+                 health_weight_entity="sensor.johan_iphone_weight")
+    yesterday, old = "2026-10-14T06:00:00+00:00", "2026-10-10T06:00:00+00:00"
+    respx.get(f"{HA}/api/states/sensor.johan_iphone_resting_heart_rate").respond(json=st("x", "52", "bpm", changed=yesterday))
+    respx.get(f"{HA}/api/states/sensor.johan_iphone_heart_rate_variability").respond(json=st("x", "61.4", "ms", changed=yesterday))
+    respx.get(f"{HA}/api/states/sensor.johan_iphone_weight").respond(json=st("x", "75", "kg", changed=old))
+    battery = respx.get(f"{HA}/api/states/sensor.johan_iphone_battery_level").respond(json=st("x", "80", "%", changed=yesterday))
+    assert await health.fetch(db, cfg, TODAY) == 0  # the phone sent nothing today, not even its battery level
+    battery.respond(json=st("x", "78", "%"))  # it's syncing today
+    assert await health.fetch(db, cfg, TODAY) == 1
+    vals = {r["metric"]: r["value"] for r in db.health(TODAY.isoformat())}
+    # resting HR carried; HRV never (it keeps the first reading, and the real one may still come); weight too old
+    assert vals == {"rhr": 52}
+    respx.get(f"{HA}/api/states/sensor.johan_iphone_resting_heart_rate").respond(json=st("x", "51", "bpm"))
+    await health.fetch(db, cfg, TODAY)
+    assert {r["metric"]: r["value"] for r in db.health(TODAY.isoformat())}["rhr"] == 51  # today's real value wins
+
+
+@respx.mock
+async def test_carried_values_are_logged(tmp_path, ha_up, caplog):
+    db = DB(tmp_path / "t.db")
+    cfg = Config(health_rhr_entity="sensor.p_resting_heart_rate", health_sleep_entity="sensor.p_sleep_duration")
+    respx.get(f"{HA}/api/states/sensor.p_resting_heart_rate").respond(json=st("x", "52", "bpm", changed="2026-10-14T06:00:00+00:00"))
+    respx.get(f"{HA}/api/states/sensor.p_sleep_duration").respond(json=st("x", "7.2", "h"))
+    with caplog.at_level("INFO"):
+        await health.fetch(db, cfg, TODAY)
+    assert "rhr 52 (unchanged since 14 Oct)" in caplog.text and "sleep 7.2" in caplog.text
 
 
 async def test_fetch_without_ha_does_nothing(tmp_path, monkeypatch):
