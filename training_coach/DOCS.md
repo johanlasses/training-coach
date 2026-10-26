@@ -202,12 +202,21 @@ total.
 | Ride feedback | Haiku 5.5 | The add-on computes the numbers; the model only judges and writes. It runs after every ride |
 | Daily check-in | Haiku 5.5 | Same idea as ride feedback: the numbers are computed, the model writes 2–4 sentences |
 
-## Zwift workouts
+## Indoor workouts: Zwift or MyWhoosh
 
-Each Zwift session carries on-screen messages in the coach's voice: the coach's own cues through the
-workout, plus a rep counter with a cheer on every interval rep.
+Each indoor session carries on-screen messages in the coach's voice: the coach's own cues through the
+workout, plus a rep counter with a cheer on every interval rep. Pick where they go under **Profile → Connections →
+Indoor app**: **Zwift** or **MyWhoosh**, the free alternative. Plans are the same either way.
 
-**Send to Zwift.** Connect your Zwift account under **Profile → Connections → Zwift**. Your password is used once to
+**Send to MyWhoosh.** Pick MyWhoosh, then sign in with your MyWhoosh email and password. The password is used once
+and not stored. Upcoming indoor sessions on the **Plan** page then get a **Send to MyWhoosh** button, and the
+workout shows up in MyWhoosh under *My Workouts*, with power as a share of the FTP set in MyWhoosh. Sending a day
+again replaces that day's workout. MyWhoosh has no public API, so the add-on signs in like its app does. Workouts
+sent this way can only be deleted in the MyWhoosh app, and MyWhoosh limits how many custom workouts you can have:
+if it's full, the button says so, and deleting a few old ones in the app makes room. If the login expires, Profile
+asks you to sign in again. MyWhoosh's workout builder also imports the **.zwo** download.
+
+**Send to Zwift.** Connect your Zwift account under **Profile → Connections → Indoor app**. Your password is used once to
 sign in and is not stored. Upcoming Zwift sessions on the **Plan** page then get a **Send to Zwift** button.
 **Restart Zwift** afterwards; the workout appears under *Workouts → Custom Workouts → Training Coach*.
 Sending again replaces the workout. Zwift has no public API for this, so the add-on uses the same file

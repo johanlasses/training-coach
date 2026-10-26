@@ -19,6 +19,7 @@ WEEKDAYS = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"]
 SECRETS = {"anthropic_api_key", "strava_client_secret", "garmin_api_key"}
 ACTIVITY_SOURCES = {"strava": "Strava", "garmin": "Garmin Connect"}
 HEALTH_SOURCES = {"apple": "Apple Health", "garmin": "Garmin Connect"}
+WORKOUT_APPS = {"zwift": "Zwift", "mywhoosh": "MyWhoosh"}
 SYNC_INTERVALS = {0: "Off", 15: "Every 15 min", 30: "Every 30 min", 60: "Every hour", 120: "Every 2 hours",
                   240: "Every 4 hours"}
 
@@ -67,6 +68,7 @@ class Config:
     activity_source: str = "strava"
     health_source: str = "apple"
     garmin_api_key: str = ""
+    workout_app: str = "zwift"  # where "Send to …" on the Plan page sends indoor sessions
     # Apple Health sensors from the HA iOS companion app (Profile). Empty = not used.
     health_rhr_entity: str = ""
     health_hrv_entity: str = ""
@@ -84,11 +86,20 @@ class Config:
 FIELD_TYPES = {f.name: f.type for f in fields(Config)}
 
 
+VALID_CHOICES = {"activity_source": ACTIVITY_SOURCES, "health_source": HEALTH_SOURCES, "workout_app": WORKOUT_APPS}
+
+
 def load_config(db: DB) -> Config:
     stored = db.get("settings") or {}
     cfg = Config(**{k: v for k, v in stored.items() if k in FIELD_TYPES})
     if not cfg.anthropic_api_key:
         cfg.anthropic_api_key = os.environ.get("ANTHROPIC_API_KEY", "")
+    # A choice that no longer exists (an integration dropped in a later version) falls back to the default
+    # instead of breaking every page that names it
+    defaults = Config()
+    for name, options in VALID_CHOICES.items():
+        if getattr(cfg, name) not in options:
+            setattr(cfg, name, getattr(defaults, name))
     return cfg
 
 

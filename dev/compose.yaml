@@ -17,6 +17,8 @@ services:
       TC_ZWIFT_AUTH_URL: http://fakes:8003/token
       TC_ZWIFT_API_URL: http://fakes:8003/api
       TC_GARMIN_URL: http://fakes:8004
+      TC_MYWHOOSH_LOGIN_URL: http://fakes:8005/http-service/api/login
+      TC_MYWHOOSH_UPLOAD_URL: http://fakes:8005/api/v2/client/custom-workout-upload
     volumes:
       - addon-data:/data
     networks: [internal]  # no internet and no published port: reachable only through the fake ingress
@@ -39,6 +41,7 @@ services:
       - "8102:8002"  # fake Anthropic controls and request log
       - "8103:8003"  # fake Zwift (/_dev/files)
       - "8104:8004"  # fake Garmin (/_dev/state)
+      - "8105:8005"  # fake MyWhoosh (/_dev/workouts)
     networks:
       internal:
         aliases: [supervisor]

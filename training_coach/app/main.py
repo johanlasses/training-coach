@@ -22,9 +22,10 @@ from . import analysis, chat, checkin, coaches, feedback, ftptest, ha, health, m
 from . import coach as coach_mod
 from . import llm
 from .config import (ACTIVITY_SOURCES, DATA_DIR, FIELD_TYPES, HEALTH_SOURCES, LEVELS, SECRETS, SYNC_INTERVALS, WEEKDAYS,
-                     Config, level_for_wkg, load_config, save_config)
+                     WORKOUT_APPS, Config, level_for_wkg, load_config, save_config)
 from .db import DB
 from .garmin import GarminClient, GarminError
+from .mywhoosh import MyWhooshClient, MyWhooshError
 from .strava import REDIRECT_URI, RateLimited, StravaClient
 from .sync import recompute, sync
 from .zwift import ZwiftClient, ZwiftError
@@ -82,6 +83,12 @@ class State:
         self.strava = StravaClient(self.db, cfg.strava_client_id, cfg.strava_client_secret)
         self.garmin = GarminClient(self.db, cfg.garmin_api_key)
         self.zwift = ZwiftClient(self.db)
+        self.mywhoosh = MyWhooshClient(self.db)
+
+    @property
+    def workout_app(self) -> ZwiftClient | MyWhooshClient:
+        """Where "Send to …" sends indoor sessions (Profile → Connections)."""
+        return self.mywhoosh if self.cfg.workout_app == "mywhoosh" else self.zwift
 
     @property
     def source(self) -> StravaClient | GarminClient:
@@ -310,7 +317,8 @@ class State:
                         not self.sync_tried or utc - self.sync_tried > every):
                     self.sync_tried = utc
                     self.start_job("sync", self.do_sync())
-                if cfg.zwift_refresh and self.zwift.configured and self.db.get("zwift_refreshed") != now.date().isoformat():
+                if (cfg.zwift_refresh and cfg.workout_app == "zwift" and self.zwift.configured
+                        and self.db.get("zwift_refreshed") != now.date().isoformat()):
                     # Keycloak drops idle sessions; a daily refresh keeps the Zwift login alive.
                     self.db.set("zwift_refreshed", now.date().isoformat())
                     try:
@@ -549,6 +557,8 @@ def render(request: Request, name: str, **ctx) -> Response:
         "is_owner": st.is_owner, "owner_name": (st.owner.name if st.owner else st.name) or "the owner",
         "source_ok": st.source.configured, "source_name": st.source_name, "activity_source": st.cfg.activity_source,
         "strava_ok": st.strava.configured, "zwift_ok": st.zwift.configured, "ai_ok": bool(st.cfg.anthropic_api_key),
+        "workout_app": st.cfg.workout_app, "workout_app_name": WORKOUT_APPS[st.cfg.workout_app],
+        "workout_app_ok": st.workout_app.configured,
         "checkin_unread": st.checkin_unread(), **ctx})
 
 
@@ -634,7 +644,7 @@ async def plan_view(request: Request, week: str | None = None):
                   active_id=active["id"] if active else None, week=ws, prev=ws - timedelta(days=7),
                   next=ws + timedelta(days=7), today=today.isoformat(), status=status, by_day=by_day, tests=tests,
                   applied_tests={t["date"] for t in st.cfg.ftp_tests}, needs_profile=needs_profile(st),
-                  zwift_uploads=st.db.get("zwift_uploads") or {})
+                  uploads=st.db.get(f"{st.cfg.workout_app}_uploads") or {})
 
 
 def zwift_day(st: State, plan_id: int, day: str) -> tuple[dict, dict, str]:
@@ -670,6 +680,25 @@ async def zwift_upload(request: Request, plan_id: int, day: str):
         st.db.set("zwift_uploads", uploads)
         st.flash = ("ok", f"“{d['title']}” is in your Zwift account. Restart Zwift, then find it under "
                           "Workouts → Custom Workouts → Training Coach.")
+    return back(request, f"/plan?week={plan['week_start']}")
+
+
+@app.post("/plan/{plan_id}/{day}/mywhoosh")
+async def mywhoosh_upload(request: Request, plan_id: int, day: str):
+    st = athlete(request)
+    plan, d, _ = zwift_day(st, plan_id, day)  # the same indoor sessions, the same coach's cheers
+    c = coaches.get(plan["coach"])
+    try:
+        await st.mywhoosh.upload_workout(day, d, f"{date.fromisoformat(day).strftime('%a %-d %b')} · {d['title']}",
+                                         c.cheers, c.last_rep)
+    except (MyWhooshError, httpx.HTTPError) as e:
+        log.warning("MyWhoosh upload failed: %s", e)
+        st.flash = ("error", f"Couldn't send “{d['title']}” to MyWhoosh: {e}")
+    else:
+        uploads = st.db.get("mywhoosh_uploads") or {}
+        uploads[f"{plan_id}/{day}"] = datetime.now().isoformat(timespec="minutes")
+        st.db.set("mywhoosh_uploads", uploads)
+        st.flash = ("ok", f"“{d['title']}” is in MyWhoosh under My Workouts. Sending this day again replaces it.")
     return back(request, f"/plan?week={plan['week_start']}")
 
 
@@ -839,7 +868,7 @@ async def analysis_now(request: Request):
 
 DAY_NAMES = dict(zip(WEEKDAYS, ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]))
 CHOICES = {"athlete_level": LEVELS, "default_coach": coaches.COACHES, "activity_source": ACTIVITY_SOURCES,
-           "health_source": HEALTH_SOURCES, "sync_interval_min": {str(k) for k in SYNC_INTERVALS},
+           "health_source": HEALTH_SOURCES, "workout_app": WORKOUT_APPS, "sync_interval_min": {str(k) for k in SYNC_INTERVALS},
            "auto_plan_day": DAY_NAMES, "auto_analysis_day": DAY_NAMES}
 TIMES = {"notify_time", "auto_plan_time", "auto_analysis_time"}
 SOURCE_FIELDS = {"activity_source", "health_source", "garmin_api_key"}  # their own routes, never apply_form
@@ -927,7 +956,8 @@ async def settings_view(request: Request):
                  "next": None if not cfg.sync_interval_min else (SYNC_INTERVALS[cfg.sync_interval_min] if st.source.configured
                                                     else f"Waiting for {st.source_name} to be connected")},
         "zwift": {"last": st.db.get("zwift_refreshed"),
-                  "next": None if not cfg.zwift_refresh else ("Daily" if st.zwift.configured else "Zwift not connected")},
+                  "next": None if not cfg.zwift_refresh else ("Off: your indoor app is MyWhoosh" if cfg.workout_app != "zwift"
+                                                              else "Daily" if st.zwift.configured else "Zwift not connected")},
         "health": {"last": (st.db.get("health_fetched") or "")[:16].replace("T", " ") or None,
                    "next": ("Every 3 hours from Garmin" if cfg.health_source == "garmin" else "Hourly from Home Assistant")
                    if health.enabled(cfg) else None},
@@ -1020,7 +1050,8 @@ async def profile_view(request: Request):
                   strava_athlete=st.db.get("strava_athlete"), strava_app=st.strava.has_app, shared_strava="strava_client_id" in st.shared,
                   authorize_url=st.strava.authorize_url() if st.strava.has_app else None, redirect_uri=REDIRECT_URI,
                   garmin_key=bool(st.cfg.garmin_api_key), garmin_status=st.garmin.status(),
-                  zwift_profile=st.db.get("zwift_profile"))
+                  zwift_profile=st.db.get("zwift_profile"), workout_apps=WORKOUT_APPS,
+                  mywhoosh_ok=st.mywhoosh.configured, mywhoosh_account=st.mywhoosh.account())
 
 
 @app.post("/profile")
@@ -1147,6 +1178,45 @@ async def zwift_connect(request: Request):
     else:
         st.flash = ("ok", f"Connected to Zwift as {profile.get('firstName', '')} {profile.get('lastName', '')}. "
                           "Zwift sessions on the Plan page now have a “Send to Zwift” button.")
+    return back(request, "/profile")
+
+
+@app.post("/profile/indoor")
+async def indoor_app_save(request: Request):
+    """Which app "Send to …" on the Plan page sends indoor sessions to. Nothing to clear: the plans stay the same."""
+    st = athlete(request)
+    app_key = str((await request.form()).get("workout_app", ""))
+    if app_key not in WORKOUT_APPS:
+        raise HTTPException(400)
+    st.cfg.workout_app = app_key
+    st.save()
+    st.reload()
+    st.flash = ("ok", f"Indoor sessions go to {WORKOUT_APPS[app_key]} now." + (
+        "" if st.workout_app.configured else f" Sign in to {WORKOUT_APPS[app_key]} below to send them directly."))
+    return back(request, "/profile")
+
+
+@app.post("/profile/mywhoosh/connect")
+async def mywhoosh_connect(request: Request):
+    st = athlete(request)
+    form = await request.form()
+    try:
+        account = await st.mywhoosh.connect(str(form.get("mywhoosh_email", "")), str(form.get("mywhoosh_password", "")))
+    except (MyWhooshError, httpx.HTTPError) as e:
+        st.mywhoosh.disconnect()
+        st.flash = ("error", f"MyWhoosh sign-in failed: {e}")
+    else:
+        st.flash = ("ok", f"Connected to MyWhoosh as {account['email']}. Indoor sessions on the Plan page now have a "
+                          "“Send to MyWhoosh” button.")
+    return back(request, "/profile")
+
+
+@app.post("/profile/mywhoosh/disconnect")
+async def mywhoosh_disconnect(request: Request):
+    st = athlete(request)
+    st.mywhoosh.disconnect()
+    st.db.set("mywhoosh_account", None)  # signed out on purpose: Profile mustn't say the login expired
+    st.flash = ("ok", "MyWhoosh disconnected. Workouts already sent stay in My Workouts.")
     return back(request, "/profile")
 
 

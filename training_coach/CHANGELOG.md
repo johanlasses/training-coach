@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.10.0 (2026-10-26)
+
+- **Send to MyWhoosh.** MyWhoosh, the free alternative to Zwift, can get the coach's indoor sessions now. Pick it
+  under **Profile → Connections → Indoor app** and sign in once (the password isn't stored). Indoor sessions on the
+  Plan page then have a **Send to MyWhoosh** button: the workout lands in *My Workouts* with the coach's on-screen
+  messages and rep cheers, like on Zwift, and power follows the FTP set in MyWhoosh. Sending a day again replaces
+  that day's workout, so re-planning never piles up copies. FTP tests ride without ERG.
+- MyWhoosh has no public API, so this works the way its own app does. Workouts sent from here can only be deleted in
+  the MyWhoosh app, and if your account is full of custom workouts, the button says so.
+- Zwift works as before; its daily login refresh only runs while Zwift is your indoor app.
+
 ## 0.9.2 (2026-10-26)
 
 - **Apple Health no longer loses days.** When your resting heart rate (or weight) was the same as the day before,

@@ -21,6 +21,7 @@ HERE = Path(__file__).parent
 PREFIX = "/api/hassio_ingress/dev"
 INGRESS = f"http://localhost:8124{PREFIX}"
 STRAVA, ANTHROPIC, ZWIFT, SUP = "http://localhost:8101", "http://localhost:8102", "http://localhost:8103", "http://localhost:8124"
+MYWHOOSH = "http://localhost:8105"
 HA = "http://localhost:8123"
 COMPOSE = ["docker", "compose", "-f", str(HERE / "compose.yaml")]
 PAGES = ["/", "/plan", "/coach", "/analysis", "/profile", "/settings"]
@@ -133,6 +134,7 @@ def fresh_addon() -> None:
 
 def reset_fakes() -> None:
     httpx.post(f"{STRAVA}/_dev/reset"), httpx.post(f"{ANTHROPIC}/_dev/reset"), httpx.delete(f"{SUP}/_dev/push")
+    httpx.post(f"{MYWHOOSH}/_dev/reset")
 
 
 def startup() -> None:
@@ -342,6 +344,30 @@ def zwift() -> None:
     check(any(k.endswith(".zwo") for k in files) and "workouts.files" in files, "workout and manifest reached the fake Zwift", str(list(files)))
 
 
+def mywhoosh() -> None:
+    section("Send to MyWhoosh (0.10.0)")
+    r = post("/profile/indoor", workout_app="mywhoosh")
+    check("Indoor sessions go to MyWhoosh now" in r.text and "Connect MyWhoosh" in r.text, "picking MyWhoosh as the indoor app")
+    r = post("/profile/mywhoosh/connect", mywhoosh_email="dev@example.com", mywhoosh_password="wrong")
+    check("MyWhoosh sign-in failed" in r.text, "a wrong MyWhoosh password is reported")
+    r = post("/profile/mywhoosh/connect", mywhoosh_email="dev@example.com", mywhoosh_password="pw")
+    check("Connected to MyWhoosh as dev@example.com" in r.text, "MyWhoosh connect works")
+    check("pw" not in json.dumps(dbq("SELECT value FROM kv WHERE key LIKE 'mywhoosh%'")), "the MyWhoosh password isn't stored")
+    plan = dbq("SELECT id, payload FROM plans ORDER BY id DESC LIMIT 1")[0]
+    day = next((d for d in json.loads(plan["payload"])["days"] if d["kind"] == "zwift"), None)
+    if not day:
+        print("  skip Send to MyWhoosh: the latest plan has no indoor day")
+    else:
+        r = post(f"/plan/{plan['id']}/{day['date']}/mywhoosh")
+        check("is in MyWhoosh under My Workouts" in r.text, "Send to MyWhoosh reports success", notice(r))
+        post(f"/plan/{plan['id']}/{day['date']}/mywhoosh")  # sending the day again replaces it
+        got = httpx.get(f"{MYWHOOSH}/_dev/workouts").json()
+        check(len(got) == 1 and next(iter(got.values()))["StepCount"] > 0, "the workout reached MyWhoosh once, re-sent in place",
+              str(got))
+        check(any(w["messages"] for w in got.values()), "the coach's on-screen messages came along")
+    post("/profile/indoor", workout_app="zwift")  # the sections after this one expect Zwift
+
+
 def failure_modes() -> None:
     section("Claude API failures show an error, not a 500")
     for mode in ("429", "500", "refusal"):
@@ -497,6 +523,7 @@ def main() -> None:
     plan_and_modes()
     chat_and_analysis()
     zwift()
+    mywhoosh()
     multi_tenant()
     tb = tracebacks()
     check(not tb, "no unexpected tracebacks during the happy paths", "; ".join(tb[:3]))

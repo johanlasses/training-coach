@@ -20,6 +20,10 @@ Setup steps are in [training_coach/DOCS.md](training_coach/DOCS.md).
 - **Garmin** (`app/garmin.py`): the official Personal API with the athlete's own key. The key mints a 24-hour token
   (a bare JWT); health reads (HRV `lastNightAvg`, sleep, resting HR, weight) backfill 35 days. Only a 401 marks the
   key refused; any other failure is treated as an outage. The OpenAPI spec is in `dev/fakes/garmin_personal_openapi.json`.
+- **Indoor apps** (`app/zwift.py`, `app/mywhoosh.py`, picked by `State.workout_app`): the plan's indoor sessions go to
+  Zwift (zfiles + manifest, like the game) or MyWhoosh (the coaching API's custom-workout upload, unofficial). MyWhoosh
+  workouts get a stable Id per plan day (`mywhoosh.workout_id`), so re-sending replaces instead of duplicating: the
+  API can't delete what it uploads (a MyWhoosh backend bug). `SportsModeType` must be the number 0.
 - **Metrics** (`app/metrics.py`): NP, IF, TSS (hrTSS when there's no power), power curve, eFTP (95% of best 20 min or best 60 min over 90 days), CP/W′, CTL/ATL/TSB, Pw:HR decoupling.
 - **Coaches** (`app/coaches.py`, `app/coaches/*.md`): three coaching styles. The markdown is appended to the plan and analysis
   prompts. Per-coach style rules (back-to-back hard days, max hard sessions) feed the plan validator.

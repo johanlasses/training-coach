@@ -89,17 +89,17 @@
       {% endfor %}
     </div>
     <div>
-      {% if d.kind == 'zwift' %}
-        {% set sent = zwift_uploads.get(plan.id ~ '/' ~ dd) %}
-        {% if zwift_ok and dd >= today %}
-        <form method="post" action="{{ base }}/plan/{{ plan.id }}/{{ dd }}/zwift" class="zwift-send">
-          <button class="{{ 'secondary' if sent }}">{{ 'Send again' if sent else 'Send to Zwift' }}</button></form>
-        {% if sent %}<p class="facts">✓ In Zwift since {{ sent | replace('T', ' ') }}</p>{% endif %}
+      {% if d.kind == 'zwift' %}{#- an indoor session; "zwift" is the plan's name for it, whichever app rides it -#}
+        {% set sent = uploads.get(plan.id ~ '/' ~ dd) %}
+        {% if workout_app_ok and dd >= today %}
+        <form method="post" action="{{ base }}/plan/{{ plan.id }}/{{ dd }}/{{ workout_app }}" class="zwift-send">
+          <button class="{{ 'secondary' if sent }}">{{ 'Send again' if sent else 'Send to ' ~ workout_app_name }}</button></form>
+        {% if sent %}<p class="facts">✓ In {{ workout_app_name }} since {{ sent | replace('T', ' ') }}</p>{% endif %}
         <a class="btn secondary" href="{{ base }}/plan/{{ plan.id }}/{{ dd }}.zwo">Download .zwo</a>
         {% else %}
         <a class="btn" href="{{ base }}/plan/{{ plan.id }}/{{ dd }}.zwo">Download .zwo</a>
-        <p class="facts" title="Documents/Zwift/Workouts/<your Zwift id>/">Save it in Zwift's Workouts folder{% if not zwift_ok %},
-          or <a href="{{ base }}/profile#connections">connect Zwift</a> to send it directly{% endif %}.</p>
+        <p class="facts">{% if workout_app == 'mywhoosh' %}Import it in MyWhoosh's workout builder{% else %}Save it in Zwift's Workouts folder{% endif %}{% if not workout_app_ok %},
+          or <a href="{{ base }}/profile#connections">connect {{ workout_app_name }}</a> to send it directly{% endif %}.</p>
         {% endif %}
       {% endif %}
     </div>

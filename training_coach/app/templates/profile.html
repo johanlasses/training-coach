@@ -166,14 +166,25 @@
 </section>
 
 <section class="card">
-  <h2>Zwift</h2>
+  <h2>Indoor app</h2>
+  <p class="caption">Where the coach's indoor sessions go, with the coach's on-screen messages. The <b>.zwo</b> download
+    on the Plan page works for both.</p>
+  <form method="post" action="{{ base }}/profile/indoor">
+    {% for k, name in workout_apps.items() %}
+    <label class="choice"><input type="radio" name="workout_app" value="{{ k }}" {{ 'checked' if k == cfg.workout_app }}>
+      <span>{{ name }}<small>{{ 'Sent to Custom Workouts; restart Zwift to see them.' if k == 'zwift' else 'The free alternative: sent to My Workouts in MyWhoosh.' }}</small></span></label>
+    {% endfor %}
+    <button class="secondary">Use this</button>
+  </form>
+
+  {% if cfg.workout_app == 'zwift' %}
+  <h3>Zwift</h3>
   {% if zwift_ok and zwift_profile %}
-    <p>✓ Connected as <b>{{ zwift_profile.firstName }} {{ zwift_profile.lastName }}</b>. Zwift sessions on the
+    <p>✓ Connected as <b>{{ zwift_profile.firstName }} {{ zwift_profile.lastName }}</b>. Indoor sessions on the
       Plan page have a <b>Send to Zwift</b> button.</p>
     <form method="post" action="{{ base }}/settings/zwift/disconnect"><button class="secondary">Disconnect</button></form>
   {% else %}
-  <p class="caption">Sends the coach's Zwift sessions straight to your Custom Workouts, with the coach's
-    on-screen messages. Zwift has no public API for this, so the add-on signs in like the Zwift app does.
+  <p class="caption">Zwift has no public API for this, so the add-on signs in like the Zwift app does.
     Your password is used once to sign in and is <b>not stored</b>. Only the login session is kept.
     {% if zwift_profile %}<br><b>The Zwift login has expired. Sign in again.</b>{% endif %}</p>
   <form method="post" action="{{ base }}/settings/zwift/connect">
@@ -183,6 +194,26 @@
     </div>
     <button>Connect Zwift</button>
   </form>
+  {% endif %}
+  {% else %}
+  <h3>MyWhoosh</h3>
+  {% if mywhoosh_ok and mywhoosh_account %}
+    <p>✓ Connected as <b>{{ mywhoosh_account.email }}</b>. Indoor sessions on the Plan page have a
+      <b>Send to MyWhoosh</b> button. Sending a day again replaces that day's workout.</p>
+    <form method="post" action="{{ base }}/profile/mywhoosh/disconnect"><button class="secondary">Disconnect</button></form>
+  {% else %}
+  <p class="caption">MyWhoosh has no public API, so the add-on signs in like the MyWhoosh app does. Your password
+    is used once to sign in and is <b>not stored</b>. Only the login session is kept. Workouts it sends can only be
+    deleted in the MyWhoosh app.
+    {% if mywhoosh_account %}<br><b>The MyWhoosh login has expired. Sign in again.</b>{% endif %}</p>
+  <form method="post" action="{{ base }}/profile/mywhoosh/connect">
+    <div class="grid2">
+      <label>MyWhoosh email <input type="email" name="mywhoosh_email" autocomplete="username" required></label>
+      <label>Password <input type="password" name="mywhoosh_password" autocomplete="current-password" required></label>
+    </div>
+    <button>Connect MyWhoosh</button>
+  </form>
+  {% endif %}
   {% endif %}
 </section>
 </div>

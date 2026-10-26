@@ -87,13 +87,13 @@ class ZwiftClient:
     async def refresh(self) -> None:
         tok = self.db.get("zwift_token") or {}
         if not tok.get("refresh_token"):
-            raise ZwiftError("Zwift is not connected — see Settings")
+            raise ZwiftError("Zwift is not connected — see Profile")
         client_id = self.db.get("zwift_client_id") or CLIENT_ID
         r = await self.http.post(TOKEN_URL, data={"client_id": client_id, "grant_type": "refresh_token",
                                                   "refresh_token": tok["refresh_token"]})
         if r.status_code in (400, 401):
             self.db.set("zwift_token", tok | {"refresh_expires_at": 0})  # dead session: show as disconnected
-            raise ZwiftError("The Zwift login has expired — reconnect in Settings")
+            raise ZwiftError("The Zwift login has expired — reconnect on Profile")
         r.raise_for_status()
         self._store(r.json())
 
