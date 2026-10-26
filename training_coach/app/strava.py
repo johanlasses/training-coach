@@ -162,7 +162,7 @@ class StravaClient:
 
     async def streams(self, activity_id: int) -> dict[str, list]:
         r = await self._get(f"/activities/{activity_id}/streams", backfill=True,
-                            keys="time,watts,heartrate", key_by_type="true")
+                            keys="time,watts,heartrate,moving", key_by_type="true")  # moving: the same call, no extra cost
         return {k: v["data"] for k, v in r.json().items()}
 
 

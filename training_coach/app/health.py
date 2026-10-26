@@ -16,7 +16,7 @@ from __future__ import annotations
 import logging
 from datetime import date, datetime, timedelta
 from math import exp, log
-from statistics import mean
+from statistics import mean, stdev
 
 from . import ha
 from .config import Config
@@ -38,6 +38,12 @@ SENSOR_KEYS = {"rhr": "resting_heart_rate", "hrv": "heart_rate_variability", "sl
 # Readiness signals from the trends in summary(). The planner's rule text (coach.HEALTH_RULES), the daily check-in and the
 # Overview gauges all read these, so they never disagree.
 READINESS = {"min_days_7d": 5, "min_days_baseline": 14, "hrv_drop_pct": -10, "rhr_rise_bpm": 4, "sleep_min_h": 6.5}
+# HRV is judged against the athlete's own smallest worthwhile change (SWC): half the standard deviation of their daily
+# ln HRV over the baseline (Plews, Buchheit). Steady overnight rMSSD (Garmin) gets a small threshold, noisy spot SDNN
+# (Apple, often -12 to -20%) a large one, so neither cries wolf nor misses a real drop. Bounded, so a few odd days
+# can't make it absurd (the lower bound wide enough not to clip Apple's spread);
+# hrv_drop_pct is the fallback when the baseline is too short.
+SWC_FACTOR, SWC_BOUNDS_PCT = 0.5, (-25.0, -3.0)
 TO_HOURS = {"h": 1, "hr": 1, "hours": 1, "min": 1 / 60, "minutes": 1 / 60, "s": 1 / 3600}
 TO_KG = {"kg": 1, "lb": 0.45359237, "lbs": 0.45359237}
 
@@ -197,10 +203,19 @@ def summary(db: DB, today: date) -> dict:
         if week and base:
             if metric == "hrv":
                 item["change_pct"] = round((exp(mean(map(log, week)) - mean(map(log, base))) - 1) * 100, 1)
+                if len(base) >= READINESS["min_days_baseline"]:
+                    item["drop_threshold_pct"] = hrv_threshold(base)
             else:
                 item["change"] = round(mean(week) - mean(base), 1)
         out[metric] = item
     return out
+
+
+def hrv_threshold(baseline: list[float]) -> float:
+    """The athlete's own HRV drop that counts (in %, negative): minus one SWC on the log scale, bounded."""
+    swc = SWC_FACTOR * stdev(log(v) for v in baseline)
+    lo, hi = SWC_BOUNDS_PCT
+    return round(min(hi, max(lo, (exp(-swc) - 1) * 100)), 1)
 
 
 def trusted(item: dict) -> bool:
@@ -213,7 +228,8 @@ def readiness(summ: dict) -> dict:
     enough data for the planner (trusted) are left out, so the gauges and the check-in never see what it ignores."""
     out = {}
     if (h := summ.get("hrv")) and trusted(h) and "change_pct" in h:
-        out["hrv"] = {"change_pct": h["change_pct"], "signal": h["change_pct"] <= READINESS["hrv_drop_pct"]}
+        threshold = h.get("drop_threshold_pct", READINESS["hrv_drop_pct"])
+        out["hrv"] = {"change_pct": h["change_pct"], "threshold_pct": threshold, "signal": h["change_pct"] <= threshold}
     if (r := summ.get("rhr")) and trusted(r) and "change" in r:
         out["rhr"] = {"change": r["change"], "signal": r["change"] >= READINESS["rhr_rise_bpm"]}
     if (s := summ.get("sleep")) and trusted(s) and s["mean_7d"] is not None:

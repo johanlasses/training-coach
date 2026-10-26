@@ -234,6 +234,19 @@ def stream_404() -> None:
     check(ride["id"] in {r["id"] for r in dbq("SELECT id FROM activities")}, "the ride whose stream 404s is imported anyway")
 
 
+def double_recording() -> None:
+    section("A session recorded twice counts once (0.12.0)")
+    zwift = httpx.post(f"{STRAVA}/_dev/ride", params={"kind": 0, "minutes_ago": 300}).json()
+    copy = httpx.post(f"{STRAVA}/_dev/head_unit", params={"copy_of": zwift["id"]}).json()
+    post("/sync")
+    wait(lambda: dbq("SELECT duplicate_of FROM activities WHERE id=? AND duplicate_of IS NOT NULL", copy["id"]),
+         "the head unit's copy to be marked", 60)
+    row = dbq("SELECT duplicate_of, streams_fetched FROM activities WHERE id=?", copy["id"])
+    check(bool(row) and row[0]["duplicate_of"] == zwift["id"], "the head unit's recording is a duplicate of Zwift's", str(row))
+    check(bool(row) and not row[0]["streams_fetched"], "…no stream call is spent on it")
+    check(f"/activity/{copy['id']}" not in page("/"), "…and it isn't in the Overview's feed")
+
+
 def ride_feedback() -> None:
     section("Ride feedback and push notification")
     httpx.delete(f"{SUP}/_dev/push")
@@ -616,6 +629,7 @@ def main() -> None:
     daily_checkin()  # before any section opens /coach, which marks it read
     mqtt_sensors()
     stream_404()
+    double_recording()
     ride_feedback()
     plan_and_modes()
     chat_and_analysis()

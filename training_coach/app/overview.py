@@ -136,7 +136,9 @@ def status(db: DB, cfg: Config, acts: list[dict], today: date, d: dict) -> dict:
 # Each band is (from, to, colour token). Form's bands are form_label's; the health ones follow health.READINESS.
 R = health.READINESS
 FORM_BANDS = [(-40, -25, "critical"), (-25, -10, "good"), (-10, 5, "text-muted"), (5, 25, "div-pos"), (25, 30, "warning")]
-HRV_BANDS = [(-20, R["hrv_drop_pct"], "critical"), (R["hrv_drop_pct"], -5, "warning"), (-5, 10, "good"), (10, 20, "text-muted")]
+def hrv_bands(threshold: float = R["hrv_drop_pct"]) -> list[tuple]:
+    """Bands around the athlete's own HRV threshold (health.hrv_threshold): red from it down, amber halfway to it."""
+    return [(-30, threshold, "critical"), (threshold, threshold / 2, "warning"), (threshold / 2, 10, "good"), (10, 20, "text-muted")]
 RHR_BANDS = [(-6, 2, "good"), (2, R["rhr_rise_bpm"], "warning"), (R["rhr_rise_bpm"], 8, "critical")]
 SLEEP_BANDS = [(4, R["sleep_min_h"], "critical"), (R["sleep_min_h"], 7, "warning"), (7, 9, "good")]
 
@@ -213,7 +215,7 @@ def gauges(st: dict, ready: dict | None, fitness: list[dict] | None = None) -> l
         # A sharp HRV rise under heavy load isn't freshness (the planner's rule): amber, not grey or green
         high_under_load = h["change_pct"] > 10 and st["tsb"] < -25
         health_gauges.append((h["signal"], gauge(
-            h["change_pct"], -20, 20, HRV_BANDS, f"{h['change_pct']:+.0f}%", "HRV",
+            h["change_pct"], -30, 20, hrv_bands(h.get("threshold_pct", R["hrv_drop_pct"])), f"{h['change_pct']:+.0f}%", "HRV",
             "high under load" if high_under_load else "vs baseline",
             colour="critical" if h["signal"] else "warning" if high_under_load else None)))
     if s := (ready or {}).get("sleep"):

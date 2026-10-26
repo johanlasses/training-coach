@@ -190,3 +190,88 @@ def test_sync_now_during_pause_explains_instead_of_failing(tmp_path, monkeypatch
         c.app.state.st.db.set("strava_backoff_until", time.time() + 600)
         assert "Sync resumes on its own" in c.post("/sync").text
         assert "sync" not in c.app.state.st.jobs
+
+
+def recording(i, sport, start, minutes, **kw):
+    return {"id": i, "name": f"{sport} {i}", "sport_type": sport, "start_date": start, "start_date_local": start.rstrip("Z"),
+            "moving_time": minutes * 60, "elapsed_time": minutes * 60 + 60, "trainer": int(sport == "VirtualRide"),
+            "device_watts": 1, "avg_hr": 140, "distance": 20000} | kw
+
+
+def test_zwift_and_the_head_unit_recording_one_ride_count_once(db):
+    from app.sync import find_duplicates, mark_duplicates, recompute
+    db.upsert_activity_summary(recording(1, "Ride", "2026-10-20T16:58:00Z", 62, trainer=1))      # the Garmin on the bars
+    db.upsert_activity_summary(recording(2, "VirtualRide", "2026-10-20T17:00:00Z", 60))         # Zwift
+    db.upsert_activity_summary(recording(3, "Run", "2026-10-20T17:30:00Z", 30))                 # another sport: not one
+    db.upsert_activity_summary(recording(4, "VirtualRide", "2026-10-21T17:00:00Z", 60))         # the next day
+    db.upsert_activity_summary(recording(5, "Ride", "2026-10-21T18:05:00Z", 60))                # right after: not one
+    assert find_duplicates(db.activities(duplicates=True)) == {1: 2}  # Zwift's recording is the one kept
+    recompute(db, Config())
+    assert [a["id"] for a in db.activities()] == [5, 4, 3, 2]  # load, lists and views see the session once
+    assert db.activity(1)["duplicate_of"] == 2
+    assert 1 not in {a["id"] for a in db.activities_missing_streams(10)}  # no stream call for the second copy
+    # Two devices on one outdoor ride: the one with power stays
+    db.upsert_activity_summary(recording(6, "Ride", "2026-10-22T08:00:00Z", 120, device_watts=0))
+    db.upsert_activity_summary(recording(7, "Ride", "2026-10-22T08:01:00Z", 119))
+    assert mark_duplicates(db) == {1: 2, 6: 7}
+
+
+def test_a_second_recording_arriving_later_gets_no_second_push(db):
+    from app.sync import mark_duplicates
+    db.upsert_activity_summary(recording(1, "Ride", "2026-10-20T16:58:00Z", 62, trainer=1))
+    db.update_activity(1, notified=1, feedback={"headline": "Solid", "notification": "n", "detail": "d"})
+    db.upsert_activity_summary(recording(2, "VirtualRide", "2026-10-20T17:00:00Z", 60))  # Zwift's upload, an hour later
+    mark_duplicates(db)
+    keep = db.activity(2)
+    assert keep["notified"] == 1 and keep["feedback"]["headline"] == "Solid"
+    assert not db.activities_to_notify("2026-10-20T00:00:00Z")
+
+
+def test_deleting_the_kept_copy_on_strava_brings_no_second_push(db):
+    from app.sync import mark_duplicates
+    db.upsert_activity_summary(recording(1, "Ride", "2026-10-20T16:58:00Z", 62, trainer=1))
+    db.upsert_activity_summary(recording(2, "VirtualRide", "2026-10-20T17:00:00Z", 60))
+    mark_duplicates(db)
+    db.update_activity(2, notified=1, feedback={"headline": "Solid", "notification": "n", "detail": "d"})  # Zwift's pushed
+    mark_duplicates(db)
+    db.delete_activities_not_in({1}, "2026-10-01T00:00:00Z")  # the athlete deletes Zwift's copy on Strava
+    mark_duplicates(db)
+    assert [a["id"] for a in db.activities()] == [1] and db.activity(1)["notified"] == 1
+    assert not db.activities_to_notify("2026-10-20T00:00:00Z") and db.activity(1)["feedback"]["headline"] == "Solid"
+
+
+def test_what_isnt_a_duplicate_and_which_copy_is_kept(db):
+    from app.sync import find_duplicates
+    # A commute saved hours later (stop button forgotten: 10 h elapsed, 40 min moving) doesn't swallow the evening ride
+    db.upsert_activity_summary(recording(1, "Ride", "2026-10-20T06:30:00Z", 40, elapsed_time=10 * 3600))
+    db.upsert_activity_summary(recording(2, "VirtualRide", "2026-10-20T16:00:00Z", 60))
+    # Zwift crashed after 30 min, the watch has the whole 90: the watch's recording is kept
+    db.upsert_activity_summary(recording(3, "VirtualRide", "2026-10-21T17:00:00Z", 30, avg_hr=None))
+    db.upsert_activity_summary(recording(4, "Ride", "2026-10-21T16:59:00Z", 90, trainer=1, device_watts=0))
+    # A ride then a run (a brick) is two sessions
+    db.upsert_activity_summary(recording(5, "Ride", "2026-10-22T08:00:00Z", 60))
+    db.upsert_activity_summary(recording(6, "Run", "2026-10-22T08:05:00Z", 30))
+    assert find_duplicates(db.activities(duplicates=True)) == {3: 4}
+
+
+def test_a_zwift_file_without_hr_gets_the_watchs(db):
+    from app.sync import mark_duplicates
+    db.upsert_activity_summary(recording(1, "VirtualRide", "2026-10-20T17:00:00Z", 60, avg_hr=None, max_hr=None))
+    db.upsert_activity_summary(recording(2, "Ride", "2026-10-20T17:00:30Z", 60, trainer=1, avg_hr=151, max_hr=175))
+    assert mark_duplicates(db) == {2: 1}
+    assert (db.activity(1)["avg_hr"], db.activity(1)["max_hr"]) == (151, 175)
+
+
+def test_a_hidden_copys_page_shows_the_kept_one(tmp_path, monkeypatch):
+    from fastapi.testclient import TestClient
+
+    from app import main
+    from app.sync import mark_duplicates
+    monkeypatch.setattr(main, "DATA_DIR", tmp_path)
+    with TestClient(main.app) as c:
+        db = main.app.state.st.db
+        db.upsert_activity_summary(recording(1, "Ride", "2026-10-20T16:58:00Z", 62, trainer=1))
+        db.upsert_activity_summary(recording(2, "VirtualRide", "2026-10-20T17:00:00Z", 60))
+        mark_duplicates(db)
+        r = c.get("/activity/1", headers={"X-Ingress-Path": "/api/hassio_ingress/abc"}, follow_redirects=False)
+        assert r.status_code == 303 and r.headers["location"] == "/api/hassio_ingress/abc/activity/2"

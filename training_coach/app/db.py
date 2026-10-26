@@ -42,7 +42,8 @@ CREATE TABLE IF NOT EXISTS activities (
     ftp_used REAL,
     tss REAL,
     intensity REAL,
-    tss_source TEXT           -- power | hr | estimate
+    tss_source TEXT,          -- power | hr | estimate (rides), rhr | rpace | estimate (runs), estimate (walks)
+    duplicate_of INTEGER      -- another recording of the same session (Zwift + head unit): left out of everything
 );
 CREATE INDEX IF NOT EXISTS idx_act_start ON activities(start_date_local);
 CREATE TABLE IF NOT EXISTS plans (
@@ -140,6 +141,8 @@ class DB:
                 self.conn.execute(f"ALTER TABLE activities ADD COLUMN {col} {decl}")
                 if col == "notified":  # rides from before the upgrade were seen already: no pushes for them
                     self.conn.execute("UPDATE activities SET notified=1")
+        if "duplicate_of" not in cols:  # added in 0.12.0
+            self.conn.execute("ALTER TABLE activities ADD COLUMN duplicate_of INTEGER")
         for table, col in (("coach_notes", "removed"), ("chat_messages", "remembered"),  # added in 0.6.0
                            ("chat_messages", "kind"), ("chat_messages", "ask")):  # added in 0.8.0
             if col not in {r["name"] for r in self.conn.execute(f"PRAGMA table_info({table})")}:
@@ -188,11 +191,13 @@ class DB:
         self.conn.commit()
         return len(gone)
 
-    def activities(self, since_local: str | None = None, limit: int | None = None) -> list[dict]:
-        sql = "SELECT * FROM activities"
-        args: list[Any] = []
+    def activities(self, since_local: str | None = None, limit: int | None = None, duplicates: bool = False) -> list[dict]:
+        """Newest first. A second recording of one session (duplicate_of, see sync.mark_duplicates) is left out, so
+        load, lists and views count each session once; `duplicates` includes them (for finding them)."""
+        sql = "SELECT * FROM activities WHERE (duplicate_of IS NULL OR ?)"
+        args: list[Any] = [duplicates]
         if since_local:
-            sql += " WHERE start_date_local >= ?"
+            sql += " AND start_date_local >= ?"
             args.append(since_local)
         sql += " ORDER BY start_date_local DESC"
         if limit:
@@ -207,7 +212,7 @@ class DB:
     def activities_missing_streams(self, limit: int) -> list[dict]:
         """Newest first. Walks never: a stream call (Strava's rate limit) for a dog walk's HR sparkline isn't worth it."""
         rows = self.conn.execute(
-            "SELECT * FROM activities WHERE streams_fetched=0 AND sport_type NOT IN ('Walk', 'Hike') "
+            "SELECT * FROM activities WHERE streams_fetched=0 AND sport_type NOT IN ('Walk', 'Hike') AND duplicate_of IS NULL "
             "ORDER BY start_date DESC LIMIT ?", (limit,)
         ).fetchall()
         return [_row(r) for r in rows]
@@ -215,7 +220,8 @@ class DB:
     def activities_to_notify(self, since_utc: str) -> list[dict]:
         """Rides started at or after `since_utc` that haven't had their post-ride notification, oldest first."""
         rows = self.conn.execute(
-            "SELECT * FROM activities WHERE notified=0 AND start_date >= ? ORDER BY start_date", (since_utc,)
+            "SELECT * FROM activities WHERE notified=0 AND duplicate_of IS NULL AND start_date >= ? ORDER BY start_date",
+            (since_utc,)
         ).fetchall()
         return [_row(r) for r in rows]
 
@@ -428,6 +434,12 @@ class DB:
 
     def count_activities(self) -> int:
         return self.conn.execute("SELECT COUNT(*) FROM activities").fetchone()[0]
+
+    def set_duplicates(self, dupes: dict[int, int]) -> None:
+        """Activity id → the recording kept for that session; every other activity is nobody's duplicate."""
+        self.conn.execute("UPDATE activities SET duplicate_of=NULL WHERE duplicate_of IS NOT NULL")
+        self.conn.executemany("UPDATE activities SET duplicate_of=? WHERE id=?", [(k, d) for d, k in dupes.items()])
+        self.conn.commit()
 
     def count_health_days(self) -> int:
         return self.conn.execute("SELECT COUNT(DISTINCT date) FROM health_daily").fetchone()[0]

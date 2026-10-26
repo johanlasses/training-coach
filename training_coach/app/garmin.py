@@ -42,6 +42,7 @@ SPORT_TYPES = {"road_biking": "Ride", "cycling": "Ride", "gravel_cycling": "Grav
                "running": "Run", "street_running": "Run", "track_running": "Run", "treadmill_running": "Run",
                "indoor_running": "Run", "trail_running": "TrailRun", "virtual_run": "VirtualRun",
                "walking": "Walk", "casual_walking": "Walk", "speed_walking": "Walk", "hiking": "Hike"}
+STOPPED_MS = 0.3  # m/s: slower than about 1 km/h is standing still
 INDOOR = {"indoor_cycling", "virtual_ride", "treadmill_running", "indoor_running", "virtual_run"}
 
 
@@ -281,7 +282,7 @@ def fit_streams(content: bytes) -> dict[str, list]:
             if not name:
                 return {}
             content = z.read(name)
-    times, watts, hr = [], [], []
+    times, watts, hr, speed = [], [], [], []
     start = None
     with fitdecode.FitReader(io.BytesIO(content), check_crc=fitdecode.CrcCheck.WARN) as fit:
         for frame in fit:
@@ -297,11 +298,14 @@ def fit_streams(content: bytes) -> dict[str, list]:
             times.append(t)
             watts.append(_num(frame, "power"))
             hr.append(_num(frame, "heart_rate"))
+            speed.append(_num(frame, "enhanced_speed") or _num(frame, "speed"))
     out: dict[str, list] = {"time": times} if times else {}
     if any(watts):
         out["watts"] = watts
     if any(hr):
         out["heartrate"] = hr
+    if any(speed):  # moving flags like Strava's (a stop with auto-pause off); none without a speed sensor indoors
+        out["moving"] = [v >= STOPPED_MS for v in speed]
     return out
 
 

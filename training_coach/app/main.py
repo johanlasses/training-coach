@@ -702,6 +702,8 @@ async def activity(request: Request, activity_id: int):
     a = st.db.activity(activity_id)
     if not a:
         raise HTTPException(404)
+    if a.get("duplicate_of") and st.db.activity(a["duplicate_of"]):  # a second recording (an old push link): the kept one
+        return back(request, f"/activity/{a['duplicate_of']}")
     day = date.fromisoformat(a["start_date_local"][:10])
     acts = st.db.activities(since_local=(day - timedelta(days=95)).isoformat())
     from .metrics import ZONES, zone_seconds
@@ -722,6 +724,15 @@ async def activity_feedback(request: Request, activity_id: int):
     return back(request, f"/activity/{activity_id}")
 
 
+def week_of(week: str | None, today: date) -> date:
+    """The Monday of the week a ?week= date falls in (plans are stored by their Monday: any other date would find no
+    plan, and planning it would store one under the wrong key); this week without one, or for a date that isn't one."""
+    try:
+        return stats.week_start(date.fromisoformat(week)) if week else stats.week_start(today)
+    except ValueError:
+        return stats.week_start(today)
+
+
 @app.get("/plan/week/{week}")
 async def plan_week_view(request: Request, week: str):
     """A path-only link to a week, for notifications: ingress deep links may drop the query string."""
@@ -735,7 +746,7 @@ async def plan_view(request: Request, week: str | None = None):
     never empty."""
     st = athlete(request)
     today = date.today()
-    ws = date.fromisoformat(week) if week else stats.week_start(today)
+    ws = week_of(week, today)
     plans = {k or "": p for k, p in st.db.week_plans(ws.isoformat()).items()}
     active = st.db.active_plan(ws.isoformat())
     lead = st.cfg.active_sports(max(today, ws))[0]
@@ -848,7 +859,7 @@ def needs_profile(st: State) -> bool:
 @app.post("/plan")
 async def plan_now(request: Request, week: str | None = None):
     st = athlete(request)
-    ws = date.fromisoformat(week) if week else stats.week_start(date.today())
+    ws = week_of(week, date.today())
     if needs_profile(st):
         st.flash = ("error", "Fill in your Profile first: the coach plans around your days, hours and goals.")
         return back(request, f"/plan?week={ws.isoformat()}")

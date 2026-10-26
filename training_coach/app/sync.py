@@ -56,6 +56,7 @@ async def sync(db: DB, strava: Source, cfg: Config) -> dict:
         db.set("mark_notified", None)
     if last:
         db.delete_activities_not_in({a["id"] for a in rides}, after.strftime("%Y-%m-%dT%H:%M:%SZ"))
+    mark_duplicates(db)  # after deletions, before the stream fetch: a second recording costs no stream call
     if rides:
         newest = max(a["start_date"] for a in rides)
         if not last or newest > last:
@@ -95,12 +96,20 @@ def process_streams(s: dict[str, list], ride: bool = True) -> dict:
     watts = metrics.resample_1hz(times, s["watts"]) if s.get("watts") and ride else []
     hr = metrics.resample_1hz(times, s["heartrate"]) if s.get("heartrate") else []
     if watts and max(watts) > 0:
-        out["np"] = metrics.normalized_power(watts)
+        # NP, zones and Pw:HR over the moving time (auto-paused stops left out, as TSS uses moving time); the power
+        # curve and the sparkline on the elapsed timeline (a best never spans a stop, the plan overlay lines up)
+        flags = s.get("moving")
+        if flags and sum(map(bool, flags)) < len(flags) / 2:
+            flags = None  # mostly "stopped": an indoor ride without a speed sensor, not a ride spent standing still
+        moving = metrics.resample_1hz(times, s["watts"], moving=True, flags=flags)
+        out["np"] = metrics.normalized_power(moving)
         out["mmp"] = metrics.mmp(watts)
-        out["power_hist"] = metrics.power_histogram(watts)
+        out["power_hist"] = metrics.power_histogram(moving)
         out["spark_watts"] = metrics.downsample(watts, 240)  # ~15 s blocks on an hour: intervals stay visible
-        if hr:
-            out["decoupling"] = metrics.decoupling(watts, hr)
+        # Pw:HR assumes one continuous effort: after a stop HR restarts low while power jumps back, so a ride stopped
+        # for more than a tenth of it reads better than it is
+        if hr and len(moving) >= 0.9 * len(watts):
+            out["decoupling"] = metrics.decoupling(moving, metrics.resample_1hz(times, s["heartrate"], moving=True, flags=flags))
     if hr:
         out["spark_hr"] = metrics.downsample(hr)
     return out
@@ -150,8 +159,80 @@ def run_load(a: dict, acts: list[dict], cfg: Config) -> tuple[float, float | Non
     return metrics.estimate_tss(secs, 55), None, "estimate"  # an easy run, ~IF 0.75
 
 
+OVERLAP = 0.5            # two recordings overlapping this much of the shorter one are one session...
+START_WINDOW = 15 * 60   # ...if they also started within this of each other (a real session starts once)
+FULL_SHARE = 0.9         # a recording holding this much of the longest one has the whole session
+
+
+def _span(a: dict) -> tuple[float, float]:
+    """(start, end) of a recording: elapsed time, but never more than 1.5 × moving time, so a ride saved hours later
+    (the stop button forgotten) can't cover the evening's session."""
+    start = datetime.fromisoformat(a["start_date"].replace("Z", "+00:00")).timestamp()
+    moving = a["moving_time"] or 0
+    return start, start + min(a["elapsed_time"] or moving, 1.5 * moving or (a["elapsed_time"] or 0))
+
+
+def _keep(group: list[dict]) -> dict:
+    """Which recording of a session to keep. Only one that holds nearly the whole session (FULL_SHARE of the longest):
+    a Zwift crash mustn't cost the rest of the ride's load. Among those: Zwift's (its name matches the workout, its
+    power is the trainer's), then one with power, then with HR, then the longer, then the first synced."""
+    longest = max(a["moving_time"] or 0 for a in group)
+    return min(group, key=lambda a: ((a["moving_time"] or 0) < FULL_SHARE * longest, a["sport_type"] != "VirtualRide",
+                                      not a.get("device_watts"), not a.get("avg_hr"), -(a["moving_time"] or 0), a["id"]))
+
+
+def find_duplicates(acts: list[dict]) -> dict[int, int]:
+    """Second recordings of one session → the one kept. One athlete can't do two rides (or runs, or walks) at once, so
+    two of the same kind that started within START_WINDOW and overlap by at least OVERLAP of the shorter one are the
+    same session recorded twice: Zwift and the head unit both uploading an indoor ride, or two devices on one outdoor
+    ride. Linear: sorted by start, a recording is only compared with those that started just before it."""
+    spans = sorted(((*_span(a), a) for a in acts if a["start_date"] and sports.kind(a["sport_type"])), key=lambda x: x[0])
+    group_of: dict[int, list[dict]] = {}
+    recent: list[tuple[float, float, dict]] = []
+    for s, e, a in spans:
+        recent = [r for r in recent if s - r[0] <= START_WINDOW]
+        match = next((b for bs, be, b in recent if sports.kind(b["sport_type"]) == sports.kind(a["sport_type"])
+                      and min(e, be) - max(s, bs) >= OVERLAP * min(e - s, be - bs) > 0), None)
+        group = group_of[match["id"]] if match else []
+        group.append(a)
+        group_of[a["id"]] = group
+        recent.append((s, e, a))
+    out = {}
+    for group in {id(g): g for g in group_of.values()}.values():
+        if len(group) > 1:
+            keep = _keep(group)
+            out |= {a["id"]: keep["id"] for a in group if a is not keep}
+    return out
+
+
+def mark_duplicates(db: DB) -> dict[int, int]:
+    """Finds second recordings and takes them out of load, lists and views (db.activities). A session is pushed once:
+    if any recording of it had its push, all of them count as notified, and feedback goes with it (so deleting the
+    kept one on Strava never brings a second push). A Zwift file without HR gets the watch's average HR."""
+    acts = db.activities(duplicates=True)
+    dupes = find_duplicates(acts)
+    by_id = {a["id"]: a for a in acts}
+    groups: dict[int, list[dict]] = {}
+    for d, k in dupes.items():
+        groups.setdefault(k, [by_id[k]]).append(by_id[d])
+        if by_id[d]["duplicate_of"] != k:
+            log.info("Activity %s (%s) is a second recording of %s (%s)", d, by_id[d]["name"], k, by_id[k]["name"])
+    for k, group in groups.items():
+        keep = by_id[k]
+        fb = next((a["feedback"] for a in group if a.get("feedback")), None)
+        if any(a["notified"] for a in group):
+            for a in group:
+                if not a["notified"] or (fb and not a.get("feedback")):
+                    db.update_activity(a["id"], notified=1, **({"feedback": fb} if fb and not a.get("feedback") else {}))
+        if not keep.get("avg_hr") and (hr := next((a for a in group if a.get("avg_hr")), None)):
+            db.update_activity(k, avg_hr=hr["avg_hr"], max_hr=hr.get("max_hr"))
+    db.set_duplicates(dupes)
+    return dupes
+
+
 def recompute(db: DB, cfg: Config) -> None:
     """Assign FTP/TSS/IF to every activity. Cheap enough to run after each sync."""
+    mark_duplicates(db)
     acts = db.activities()
     for a in acts:
         if not sports.is_ride(a):

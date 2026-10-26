@@ -23,19 +23,32 @@ ZONES = [
 ]
 
 
-def resample_1hz(times: list[int], values: list[float | None], max_gap: int = 30) -> list[float]:
-    """Resample a Strava stream to 1 Hz. Short gaps hold the last value; long gaps (stops) are zeros."""
+def resample_1hz(times: list[int], values: list[float | None], max_gap: int = 30, moving: bool = False,
+                 flags: list[bool] | None = None) -> list[float]:
+    """Resample a Strava stream to 1 Hz. Short gaps hold the last value. Long gaps (a stop, or the bike computer's
+    auto-pause) are zeros on the elapsed timeline, or left out with `moving`: the moving data, stitched together.
+    With `moving`, `flags` (Strava's moving stream, or speed from a FIT file) also leave out the samples recorded while
+    stopped (a café stop with auto-pause off); coasting while rolling stays in.
+
+    Zeros for a stop would pull NP down, add fake seconds to the lowest zone and skew Pw:HR; but a power-curve best
+    must not span a coffee stop, so mmp keeps them."""
     if not times:
         return []
     out: list[float] = []
+    prev = None
     for i, t in enumerate(times):
+        if moving and flags is not None and i < len(flags) and not flags[i]:
+            prev = t
+            continue
         v = float(values[i] or 0)
-        if i:
-            gap = t - times[i - 1]
-            if gap > 1:
-                fill = out[-1] if gap <= max_gap else 0.0
-                out.extend([fill] * (gap - 1))
+        if prev is not None and out:
+            gap = t - prev
+            if 1 < gap <= max_gap:
+                out.extend([out[-1]] * (gap - 1))
+            elif gap > max_gap and not moving:
+                out.extend([0.0] * (gap - 1))
         out.append(v)
+        prev = t
     return out
 
 

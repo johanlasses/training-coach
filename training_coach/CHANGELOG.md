@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.12.0 (2026-10-27)
+
+- **A session recorded twice counts once.** When Zwift and your bike computer (or two devices) both upload the same
+  ride, the add-on keeps one: Zwift's, unless it's missing part of the session, then the most complete one with power.
+  The other copy drops out of your load, ride list and stats, and costs no extra Strava calls or notifications. If you
+  had double recordings, your fitness (CTL) and weekly hours drop to what you actually rode.
+- **NP ignores stops.** Café stops and auto-paused time no longer pull normalized power, zones and Pw:HR down, so a
+  ride with stops gets its true NP and TSS. This applies to rides synced from now on.
+- **Your own HRV threshold.** An HRV drop is now judged against your own day-to-day spread (the smallest worthwhile
+  change), not a fixed −10%: a steady overnight HRV reacts to smaller drops, a noisy one needs a bigger one. The HRV
+  gauge shows your threshold.
+- **Week links always find their plan.** A link to any day of a week opens that week's plan.
+
 ## 0.11.2 (2026-10-27)
 
 - **Reset an athlete's data (owner only).** Settings → Athletes has **Reset … data** under each athlete: tick their

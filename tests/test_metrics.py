@@ -101,3 +101,30 @@ def test_decoupling_detects_drift():
 
 def test_zone_seconds_without_ftp_is_empty():
     assert metrics.zone_seconds({200: 60}, None) == [0] * len(metrics.ZONES)
+
+
+def test_auto_paused_stop_is_left_out_of_np_but_not_out_of_the_power_curve():
+    from app.sync import process_streams
+    # 20 min at 200 W, the bike computer auto-paused for 10 min at a café, 20 min at 200 W
+    times = list(range(1200)) + list(range(1800, 3000))
+    out = process_streams({"time": times, "watts": [200] * 2400, "heartrate": [140] * 2400})
+    assert out["np"] == pytest.approx(200)  # zeros for the stop used to pull it to ~185
+    assert sum(out["power_hist"].values()) == 2400 and 0 not in out["power_hist"]  # no fake Z1 seconds
+    assert out["mmp"][1200] == 200 and out["mmp"][1800] < 200  # a 30-min best can't span the stop
+    assert len(metrics.resample_1hz(times, [1] * 2400)) == 3000  # the elapsed timeline still has the stop
+
+
+def test_a_stop_recorded_with_auto_pause_off_is_left_out_too():
+    from app.sync import process_streams
+    # 20 min at 200 W, 10 min standing at a café still recording (zeros, moving=False), 20 min at 200 W
+    watts = [200] * 1200 + [0] * 600 + [200] * 1200
+    moving = [True] * 1200 + [False] * 600 + [True] * 1200
+    out = process_streams({"time": list(range(3000)), "watts": watts, "heartrate": [140] * 3000, "moving": moving})
+    assert out["np"] == pytest.approx(200) and 0 not in out["power_hist"]
+    assert "decoupling" not in out  # stopped for a fifth of the ride: Pw:HR would read better than it is
+    # Coasting while rolling stays in: zeros with moving=True count
+    coast = process_streams({"time": list(range(3000)), "watts": watts, "moving": [True] * 3000})
+    assert coast["np"] < 195
+    # An indoor ride without a speed sensor: everything "stopped", so the flags are ignored, not the whole ride
+    indoor = process_streams({"time": list(range(2400)), "watts": [200] * 2400, "moving": [False] * 2400})
+    assert indoor["np"] == pytest.approx(200)

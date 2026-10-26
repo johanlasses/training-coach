@@ -280,3 +280,29 @@ def test_notify_suggestion_only_when_unambiguous(client, monkeypatch):
     client.post("/settings", data={"_section": "schedules", "notify_service": "notify.old_phone"})
     html = client.get("/settings").text  # two phones, neither matches: keep what's stored, just warn
     assert 'name="notify_service" value="notify.old_phone"' in html and "Pick one from the list" in html
+
+
+def test_hrv_threshold_is_the_athletes_own_swc():
+    from app.health import hrv_threshold
+    steady = [60, 62, 61, 59, 60, 63, 61, 60, 62, 59, 61, 60, 62, 61]   # Garmin's overnight rMSSD: ~2% spread
+    noisy = [35, 60, 42, 75, 50, 38, 66, 45, 80, 40, 55, 70, 36, 58]    # Apple's spot SDNN
+    assert hrv_threshold(steady) == -3.0          # a small spread: a small drop already counts (bounded at -3%)
+    assert hrv_threshold(noisy) == -13.1          # a wide spread: only a big drop counts
+    assert hrv_threshold([20, 90] * 7) == -25.0   # bounded: a few odd days can't make it absurd
+
+
+def test_summary_gives_hrv_its_threshold_once_the_baseline_is_long_enough(tmp_path):
+    from datetime import date, timedelta
+
+    from app.db import DB
+    from app.health import readiness, summary
+    db, today = DB(tmp_path / "t.db"), date(2026, 10, 27)
+    for i in range(35):
+        db.set_health((today - timedelta(days=i)).isoformat(), "hrv", 60 + (i % 3) - (6 if i < 7 else 0), "ms")
+    s = summary(db, today)["hrv"]
+    assert s["drop_threshold_pct"] == -3.0 and s["change_pct"] < -3
+    assert readiness({"hrv": s})["hrv"] == {"change_pct": s["change_pct"], "threshold_pct": -3.0, "signal": True}
+    db2 = DB(tmp_path / "t2.db")
+    for i in range(10):  # only a short baseline: no personal threshold yet
+        db2.set_health((today - timedelta(days=i)).isoformat(), "hrv", 60, "ms")
+    assert "drop_threshold_pct" not in summary(db2, today)["hrv"]

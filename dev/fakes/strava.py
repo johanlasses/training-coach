@@ -153,6 +153,19 @@ def add_ride(kind: int = 0, minutes_ago: int = 30, sport: str = ""):
     return {"id": aid, "name": ride["name"]}
 
 
+@app.post("/_dev/head_unit")
+def head_unit(copy_of: int):
+    """The same session recorded again by a bike computer on the bars (Zwift and the head unit both upload):
+    a "Ride" on the trainer, started 2 minutes earlier, 3 minutes longer."""
+    src = next(r for r in all_rides() if r["id"] == copy_of)
+    aid = 9000 + len(state["extra"])
+    n = src["n"] + 180
+    state["extra"].append(src | {"id": aid, "name": "Indoor Cycling", "sport_type": "Ride", "type": "Ride",
+                                 "start": src["start"] - timedelta(minutes=2), "n": n,
+                                 "watts": [*src["watts"], *[0.0] * 180], "hr": [*src["hr"], *[src["hr"][-1]] * 180]})
+    return {"id": aid}
+
+
 @app.post("/_dev/fail")
 def fail(stream_404: int | None = None, rate_limit: int | None = None):
     if stream_404:

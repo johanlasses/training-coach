@@ -331,8 +331,12 @@ def test_readiness_uses_the_planner_thresholds():
     item = lambda **kw: {"days_7d": 6, "days_baseline": 20, "mean_7d": 7, "baseline_mean": 7} | kw  # noqa: E731
     r = health.readiness({"hrv": item(change_pct=-10), "rhr": item(change=3.9), "sleep": item(mean_7d=6.4)})
     assert "sleep" not in health.readiness({"sleep": item(mean_7d=5, days_baseline=10)})  # as untrusted as the planner sees it
-    assert r == {"hrv": {"change_pct": -10, "signal": True}, "rhr": {"change": 3.9, "signal": False},
+    assert r == {"hrv": {"change_pct": -10, "threshold_pct": -10, "signal": True}, "rhr": {"change": 3.9, "signal": False},
                  "sleep": {"mean_7d": 6.4, "baseline_mean": 7, "signal": True}}
     assert health.readiness({"hrv": item(change_pct=-30, days_7d=4)}) == {}  # too few days to trust
     from app.coach import HEALTH_RULES
     assert "-10%" in HEALTH_RULES and "+4 bpm" in HEALTH_RULES and "6.5 h" in HEALTH_RULES
+    assert "drop_threshold_pct" in HEALTH_RULES
+    # The athlete's own threshold, when the baseline gave one, decides instead of the fixed -10%
+    assert health.readiness({"hrv": item(change_pct=-6, drop_threshold_pct=-5.2)})["hrv"]["signal"]
+    assert not health.readiness({"hrv": item(change_pct=-12, drop_threshold_pct=-14.0)})["hrv"]["signal"]

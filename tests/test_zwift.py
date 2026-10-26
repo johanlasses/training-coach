@@ -131,7 +131,8 @@ def client(tmp_path, monkeypatch):
         payload = {"week_focus": "f", "rationale": "r", "block_week": 1, "days": [
             {"date": day, "kind": "zwift", "title": "VO2 5x3", "description": "d", "duration_min": 40,
              "intensity": "vo2max", "target_tss": 50, "bike": "trainer", "terrain": "", "steps": STEPS}]}
-        c.plan_id = st.db.save_plan(day, "2026-10-12T08:00:00", "m", payload, [], "carmichael")
+        week = (date.fromisoformat(day) - timedelta(days=date.fromisoformat(day).weekday())).isoformat()  # plans are by Monday
+        c.plan_id = st.db.save_plan(week, "2026-10-12T08:00:00", "m", payload, [], "carmichael")
         c.day, c.st = day, st
         yield c
 
@@ -156,7 +157,8 @@ def test_a_past_session_can_be_sent_too(client):
     past = (date.today() - timedelta(days=8)).isoformat()
     payload = st.db.plan(client.plan_id)["payload"]
     payload["days"][0]["date"] = past
-    plan_id = st.db.save_plan(past, "2026-10-12T08:00:00", "m", payload, [], "carmichael")
+    monday = (date.fromisoformat(past) - timedelta(days=date.fromisoformat(past).weekday())).isoformat()
+    plan_id = st.db.save_plan(monday, "2026-10-12T08:00:00", "m", payload, [], "carmichael")
     connected(st.db)
     assert f'action="/plan/{plan_id}/{past}/zwift"' in client.get(f"/plan?week={past}").text
 

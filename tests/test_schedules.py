@@ -211,3 +211,11 @@ def test_usage_cost_uses_each_models_price(tmp_path):
             input_tokens=1_000_000, output_tokens=0, cache_read_input_tokens=0)))
     usage = db.llm_usage(cost=llm.cost)
     assert usage["plan"]["cost"] == 4.0 and usage["ride"]["cost"] == 0.10
+
+
+def test_a_week_link_snaps_to_its_monday():
+    # Plans are stored by their Monday: a mid-week ?week= used to find no plan, and planning it stored one under a Wednesday
+    today = main.date(2026, 10, 28)
+    assert main.week_of("2026-10-29", today) == main.date(2026, 10, 26)
+    assert main.week_of("2026-10-26", today) == main.date(2026, 10, 26)
+    assert main.week_of(None, today) == main.week_of("not-a-date", today) == main.date(2026, 10, 26)

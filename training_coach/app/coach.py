@@ -112,7 +112,9 @@ HEALTH_RULES = """- snapshot.health, when present, holds health trends from heal
 7 days against a baseline of the 28 days \
 before them, with the days of data in each. Read them as a readiness signal, never from a single day, and only \
 when the 7 days hold at least {min_days_7d} days of data and the baseline at least {min_days_baseline}. Signals: HRV \
-change_pct about {hrv_drop_pct}% or lower, resting HR change +{rhr_rise_bpm} bpm or more, 7-day sleep under ~{sleep_min_h} h. \
+change_pct at or below hrv.drop_threshold_pct (the athlete's own smallest worthwhile change, from the day-to-day \
+spread of their HRV; {hrv_drop_pct}% when it's missing), resting HR change +{rhr_rise_bpm} bpm or more, 7-day sleep \
+under ~{sleep_min_h} h. \
 Two signals together: swap the next hard \
 session for endurance or rest and say why. One signal: keep the session but shorten it or cap it at the low \
 end of its targets, and mention it. A sharp HRV rise during heavy load isn't freshness. Weight is only for \
