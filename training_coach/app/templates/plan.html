@@ -99,7 +99,7 @@
         {% else %}
         <a class="btn" href="{{ base }}/plan/{{ plan.id }}/{{ dd }}.zwo">Download .zwo</a>
         <p class="facts">{% if workout_app == 'mywhoosh' %}Import it in MyWhoosh's workout builder{% else %}Save it in Zwift's Workouts folder{% endif %}{% if not workout_app_ok %},
-          or <a href="{{ base }}/profile#connections">connect {{ workout_app_name }}</a> to send it directly{% endif %}.</p>
+          or <a href="{{ base }}/profile#conn-{{ workout_app }}">connect {{ workout_app_name }}</a> to send it directly{% endif %}.</p>
         {% endif %}
       {% endif %}
     </div>

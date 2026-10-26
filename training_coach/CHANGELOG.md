@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.10.1 (2026-10-26)
+
+- **Every connection on Profile, all the time.** Strava, Garmin Connect, Apple Health, Zwift and MyWhoosh each have
+  their own card under Connections, so you can sign in to MyWhoosh (or Garmin) before you pick it.
+- **You can only pick what's connected.** In Rides, Health and Indoor app, a choice that isn't connected yet is
+  greyed out with "Connection needs to be created" and a link to its card. Your current choice always stays.
+
 ## 0.10.0 (2026-10-26)
 
 - **Send to MyWhoosh.** MyWhoosh, the free alternative to Zwift, can get the coach's indoor sessions now. Pick it

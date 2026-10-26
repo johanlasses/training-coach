@@ -31,7 +31,7 @@
 <main>
   {% if flash %}<div class="notice {{ 'error' if flash[0] == 'error' }}">{{ flash[1] }}</div>{% endif %}
   {% if not source_ok and page != 'profile' %}
-  <div class="notice error">{{ source_name }} is not connected. <a href="{{ base }}/profile#connections">Connect it on Profile</a>.</div>
+  <div class="notice error">{{ source_name }} is not connected. <a href="{{ base }}/profile#conn-{{ activity_source }}">Connect it on Profile</a>.</div>
   {% endif %}
   {#- A failed check-in only shows on the Coach page: it's a nice-to-have, not worth a banner on every page all day -#}
   {% for name, job in jobs.items() if job.error and name != 'checkin' %}

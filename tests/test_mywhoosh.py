@@ -1,5 +1,6 @@
 import base64
 import json
+import re
 import time
 from datetime import date, timedelta
 
@@ -12,6 +13,8 @@ from app.db import DB
 from app.mywhoosh import LOGIN_URL, UPLOAD_URL, MyWhooshClient, MyWhooshError, to_steps, to_workout, workout_id
 
 from .test_workouts import STEPS, step
+
+DISABLED = re.compile(r'value="mywhoosh"[^>]*\sdisabled')  # the MyWhoosh choice greyed out on Profile
 
 
 def jwt(exp: float) -> str:
@@ -146,12 +149,13 @@ def web(tmp_path, monkeypatch):
 def test_pick_mywhoosh_connect_and_send(web, monkeypatch):
     st = web.st
     html = web.get("/profile").text
-    assert "Indoor app" in html and 'name="workout_app" value="mywhoosh"' in html and "Connect Zwift" in html
+    # Both sign-ins show at all times; MyWhoosh can't be picked until it's connected
+    assert "Indoor app" in html and "Connect Zwift" in html and "Connect MyWhoosh" in html
+    assert DISABLED.search(html) and "Connection needs to be created" in html
+    assert 'href="#conn-mywhoosh"' in html
     r = web.post("/profile/indoor", data={"workout_app": "mywhoosh"})
-    assert "Indoor sessions go to MyWhoosh now" in r.text and "Connect MyWhoosh" in r.text and "Connect Zwift" not in r.text
+    assert "Connect MyWhoosh first" in r.text and st.cfg.workout_app == "zwift"  # the server refuses it too
     assert web.post("/profile/indoor", data={"workout_app": "rouvy"}).status_code == 400
-    plan = web.get(f"/plan?week={web.day}").text
-    assert "connect MyWhoosh" in plan and "Send to MyWhoosh" not in plan
 
     async def connect(self, email, password):
         self.db.set("mywhoosh_token", {"access_token": "t", "whoosh_id": "w", "expires_at": time.time() + 3600})
@@ -169,6 +173,9 @@ def test_pick_mywhoosh_connect_and_send(web, monkeypatch):
     r = web.post("/profile/mywhoosh/connect", data={"mywhoosh_email": "rider@example.com", "mywhoosh_password": "pw"})
     assert "Connected to MyWhoosh as rider@example.com" in r.text and "pw" not in st.db.conn.execute(
         "SELECT group_concat(value) FROM kv").fetchone()[0]
+    assert not DISABLED.search(r.text)  # connected: now it can be picked
+    r = web.post("/profile/indoor", data={"workout_app": "mywhoosh"})
+    assert "Indoor sessions go to MyWhoosh now" in r.text and st.cfg.workout_app == "mywhoosh"
     plan = web.get(f"/plan?week={web.day}").text
     assert f'action="/plan/{web.plan_id}/{web.day}/mywhoosh"' in plan and "Send to MyWhoosh" in plan
     r = web.post(f"/plan/{web.plan_id}/{web.day}/mywhoosh")

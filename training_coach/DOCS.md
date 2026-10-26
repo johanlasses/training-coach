@@ -133,7 +133,8 @@ official Personal API with a key you create yourself:
 
 1. On Garmin Connect in a browser, open **Personal API Key** (<https://connect.garmin.com/modern/settings/personalApiToken>),
    choose **Create Key**, accept the terms and pick how long it lasts. A year means fewer renewals.
-2. Garmin shows the key once. Copy it, pick Garmin under **Connections** and paste it into **Connect Garmin**.
+2. Garmin shows the key once. Copy it and paste it into **Connect Garmin** under **Connections**. Once it's
+   connected, Garmin becomes selectable under **Rides** and **Health**.
    The add-on checks it right away. It's stored only in the add-on and never shown again.
 
 **Rides**: all cycling activities (road, gravel, MTB, indoor and Zwift rides that reach Garmin), with power and heart
@@ -208,8 +209,8 @@ Each indoor session carries on-screen messages in the coach's voice: the coach's
 workout, plus a rep counter with a cheer on every interval rep. Pick where they go under **Profile → Connections →
 Indoor app**: **Zwift** or **MyWhoosh**, the free alternative. Plans are the same either way.
 
-**Send to MyWhoosh.** Pick MyWhoosh, then sign in with your MyWhoosh email and password. The password is used once
-and not stored. Upcoming indoor sessions on the **Plan** page then get a **Send to MyWhoosh** button, and the
+**Send to MyWhoosh.** Sign in on the **MyWhoosh** card with your MyWhoosh email and password, then pick MyWhoosh
+under **Indoor app**: a choice only becomes selectable once it's connected. The password is used once and not stored. Upcoming indoor sessions on the **Plan** page then get a **Send to MyWhoosh** button, and the
 workout shows up in MyWhoosh under *My Workouts*, with power as a share of the FTP set in MyWhoosh. Sending a day
 again replaces that day's workout. MyWhoosh has no public API, so the add-on signs in like its app does. Workouts
 sent this way can only be deleted in the MyWhoosh app, and MyWhoosh limits how many custom workouts you can have:

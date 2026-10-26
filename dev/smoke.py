@@ -346,12 +346,17 @@ def zwift() -> None:
 
 def mywhoosh() -> None:
     section("Send to MyWhoosh (0.10.0)")
+    p = page("/profile")
+    check("Connect MyWhoosh" in p and bool(re.search(r'value="mywhoosh"[^>]*\sdisabled', p)),
+          "MyWhoosh's sign-in shows; it can't be picked yet (0.10.1)")
     r = post("/profile/indoor", workout_app="mywhoosh")
-    check("Indoor sessions go to MyWhoosh now" in r.text and "Connect MyWhoosh" in r.text, "picking MyWhoosh as the indoor app")
+    check("Connect MyWhoosh first" in r.text, "picking MyWhoosh before it's connected is refused")
     r = post("/profile/mywhoosh/connect", mywhoosh_email="dev@example.com", mywhoosh_password="wrong")
     check("MyWhoosh sign-in failed" in r.text, "a wrong MyWhoosh password is reported")
     r = post("/profile/mywhoosh/connect", mywhoosh_email="dev@example.com", mywhoosh_password="pw")
     check("Connected to MyWhoosh as dev@example.com" in r.text, "MyWhoosh connect works")
+    r = post("/profile/indoor", workout_app="mywhoosh")
+    check("Indoor sessions go to MyWhoosh now" in r.text, "picking MyWhoosh once it's connected")
     check("pw" not in json.dumps(dbq("SELECT value FROM kv WHERE key LIKE 'mywhoosh%'")), "the MyWhoosh password isn't stored")
     plan = dbq("SELECT id, payload FROM plans ORDER BY id DESC LIMIT 1")[0]
     day = next((d for d in json.loads(plan["payload"])["days"] if d["kind"] == "zwift"), None)

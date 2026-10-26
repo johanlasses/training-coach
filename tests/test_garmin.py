@@ -247,6 +247,24 @@ def test_profile_connections_and_the_key_never_rendered(web, monkeypatch):
     assert "Garmin Connect is not connected" in web.get("/").text
 
 
+def test_connecting_strava_while_rides_come_from_garmin_doesnt_sync_garmin(web, monkeypatch):
+    st = main.app.state.st
+    st.cfg.activity_source = "garmin"
+    st.save()
+    st.reload()
+    started = []
+
+    async def exchange(self, pasted):
+        self.db.set("strava_token", {"refresh_token": "r"})
+        return {"firstname": "Dev", "lastname": "Rider"}
+
+    monkeypatch.setattr(main.StravaClient, "exchange_code", exchange)
+    monkeypatch.setattr(st, "start_job", lambda name, coro: (coro.close(), started.append(name)))
+    r = web.post("/settings/strava/connect", data={"redirect_url": "http://localhost/strava-callback?code=x"})
+    assert "Connected to Strava as Dev Rider. Pick Strava under Rides" in r.text and "First sync" not in r.text
+    assert started == []  # no sync of the Garmin source behind the Strava success message
+
+
 async def test_a_garmin_429_on_connect_is_a_message_not_a_500(web, monkeypatch):
     async def busy(self):
         raise RateLimited("busy")

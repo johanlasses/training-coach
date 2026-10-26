@@ -259,6 +259,10 @@ table.zones td.num { width: 90px; text-align: right; white-space: nowrap; }
 .form-page label.choice { display: flex; gap: 10px; align-items: flex-start; color: var(--text-primary); font-size: 14px; }
 .form-page label.choice input { margin-top: 3px; }
 .form-page label.choice small { margin-top: 1px; }
+/* A choice whose connection isn't made yet: greyed out, with a hint and a link to its card */
+.form-page label.choice.unavailable { color: var(--text-muted); cursor: default; }
+.form-page label.choice small.warn { color: var(--text-secondary); }
+.form-page label.choice small.warn a { color: inherit; }
 .form-page .row { display: flex; gap: 12px; align-items: center; }
 .form-page .row input { margin-top: 0; }
 .form-page .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 0 16px; }

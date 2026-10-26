@@ -52,7 +52,7 @@
   <h2>Strava API app</h2>
   {% if shared_strava %}
   <p class="caption">Your Strava sign-in goes through {{ owner_name }}'s Strava API app, so there's nothing to set up.
-    Connect your Strava account on <a href="{{ base }}/profile#connections">Profile</a>.</p>
+    Connect your Strava account on <a href="{{ base }}/profile#conn-strava">Profile</a>.</p>
   <details><summary class="muted">Use your own Strava API app instead (optional)</summary>
   <p>Create one at <a href="https://www.strava.com/settings/api" target="_blank" rel="noopener">strava.com/settings/api</a>
     with <b>Authorization Callback Domain</b> <code>localhost</code>, then enter it here.</p>
@@ -69,7 +69,7 @@
     athlete who picks Strava on Profile signs in through it{% endif %}. Create one at
     <a href="https://www.strava.com/settings/api" target="_blank" rel="noopener">strava.com/settings/api</a> and set
     <b>Authorization Callback Domain</b> to <code>localhost</code>. Any name, website and icon will do. Then connect
-    your account on <a href="{{ base }}/profile#connections">Profile</a>.</p>
+    your account on <a href="{{ base }}/profile#conn-strava">Profile</a>.</p>
   <form method="post" action="{{ base }}/settings">
     <div class="grid2">
       <label>Client ID <input name="strava_client_id" value="{{ cfg.strava_client_id }}" inputmode="numeric"></label>

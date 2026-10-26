@@ -85,6 +85,12 @@ class State:
         self.zwift = ZwiftClient(self.db)
         self.mywhoosh = MyWhooshClient(self.db)
 
+    def connected(self) -> dict[str, bool]:
+        """Which third-party connections work, by the keys Profile's choices use: a choice only becomes selectable
+        once it's connected."""
+        return {"strava": self.strava.configured, "garmin": self.garmin.configured, "apple": bool(health.entities(self.cfg)),
+                "zwift": self.zwift.configured, "mywhoosh": self.mywhoosh.configured}
+
     @property
     def workout_app(self) -> ZwiftClient | MyWhooshClient:
         """Where "Send to …" sends indoor sessions (Profile → Connections)."""
@@ -872,6 +878,7 @@ CHOICES = {"athlete_level": LEVELS, "default_coach": coaches.COACHES, "activity_
            "auto_plan_day": DAY_NAMES, "auto_analysis_day": DAY_NAMES}
 TIMES = {"notify_time", "auto_plan_time", "auto_analysis_time"}
 SOURCE_FIELDS = {"activity_source", "health_source", "garmin_api_key"}  # their own routes, never apply_form
+CONNECTION_NAMES = {"strava": "Strava", "garmin": "Garmin", "apple": "Apple Health", "zwift": "Zwift", "mywhoosh": "MyWhoosh"}
 
 
 def valid_time(raw: str) -> bool:
@@ -1043,14 +1050,15 @@ async def profile_view(request: Request):
                   history=memory.history(st.db, st.cfg, datetime.now(), memory_ids=True),
                   health_latest=health.summary(st.db, today), health_options=options,
                   # Pre-fill only on first setup, so a field cleared on purpose stays cleared
-                  health_found={} if health.entities(st.cfg) else health.detect(options or []),
+                  # Pre-fill only on first setup, and only while Apple Health is the source: saving the profile saves them
+                  health_found={} if health.entities(st.cfg) or st.cfg.health_source != "apple" else health.detect(options or []),
                   suggested=level_for_wkg(wkg) if wkg else None,
                   # Connections
                   activity_sources=ACTIVITY_SOURCES, health_sources=HEALTH_SOURCES, has_rides=bool(acts),
                   strava_athlete=st.db.get("strava_athlete"), strava_app=st.strava.has_app, shared_strava="strava_client_id" in st.shared,
                   authorize_url=st.strava.authorize_url() if st.strava.has_app else None, redirect_uri=REDIRECT_URI,
                   garmin_key=bool(st.cfg.garmin_api_key), garmin_status=st.garmin.status(),
-                  zwift_profile=st.db.get("zwift_profile"), workout_apps=WORKOUT_APPS,
+                  zwift_profile=st.db.get("zwift_profile"), workout_apps=WORKOUT_APPS, connected=st.connected(),
                   mywhoosh_ok=st.mywhoosh.configured, mywhoosh_account=st.mywhoosh.account())
 
 
@@ -1074,10 +1082,11 @@ async def source_save(request: Request):
     act, hea = str(form.get("activity_source", st.cfg.activity_source)), str(form.get("health_source", st.cfg.health_source))
     if act not in ACTIVITY_SOURCES or hea not in HEALTH_SOURCES:
         raise HTTPException(400)
-    if "garmin" in {act, hea} - {st.cfg.activity_source, st.cfg.health_source} and not st.garmin.configured:
-        # Clearing the rides before the new source works would leave the athlete with nothing (CTL 0) in between
-        st.flash = ("error", "Connect Garmin first (below), then switch to it.")
-        return back(request, "/profile")
+    for new, old in ((act, st.cfg.activity_source), (hea, st.cfg.health_source)):
+        if new != old and not st.connected()[new]:
+            # Clearing the rides before the new source works would leave the athlete with nothing (CTL 0) in between
+            st.flash = ("error", f"Connect {CONNECTION_NAMES[new]} first (below), then switch to it.")
+            return back(request, "/profile")
     if any((st.jobs.get(k) or {}).get("running") for k in ("sync", "health")):
         # A running sync or health read would write the old source's data into the cleared tables
         st.flash = ("error", "A sync is running. Try again in a minute.")
@@ -1152,7 +1161,11 @@ async def strava_connect(request: Request):
     except (ValueError, KeyError) as e:
         st.flash = ("error", str(e))
         return back(request, "/profile")
-    st.flash = ("ok", f"Connected to Strava as {who.get('firstname', '')} {who.get('lastname', '')}. "
+    name = f"{who.get('firstname', '')} {who.get('lastname', '')}".strip()
+    if st.cfg.activity_source != "strava":  # connected ahead of switching: rides still come from the other source
+        st.flash = ("ok", f"Connected to Strava as {name}. Pick Strava under Rides to use it.")
+        return back(request, "/profile")
+    st.flash = ("ok", f"Connected to Strava as {name}. "
                       "First sync started — it pulls 12 months of rides, power detail fills in over a few hours.")
     st.start_job("sync", st.do_sync())
     return back(request, "/profile")
@@ -1188,11 +1201,13 @@ async def indoor_app_save(request: Request):
     app_key = str((await request.form()).get("workout_app", ""))
     if app_key not in WORKOUT_APPS:
         raise HTTPException(400)
+    if app_key != st.cfg.workout_app and not st.connected()[app_key]:
+        st.flash = ("error", f"Connect {WORKOUT_APPS[app_key]} first (below), then switch to it.")
+        return back(request, "/profile")
     st.cfg.workout_app = app_key
     st.save()
     st.reload()
-    st.flash = ("ok", f"Indoor sessions go to {WORKOUT_APPS[app_key]} now." + (
-        "" if st.workout_app.configured else f" Sign in to {WORKOUT_APPS[app_key]} below to send them directly."))
+    st.flash = ("ok", f"Indoor sessions go to {WORKOUT_APPS[app_key]} now.")
     return back(request, "/profile")
 
 

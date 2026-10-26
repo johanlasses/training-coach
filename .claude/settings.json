@@ -60,6 +60,7 @@
       "Bash(.venv/bin/ruff check training_coach tests tools)",
       "Bash(curl -s localhost:*)",
       "Bash(.venv/bin/python tools/mobile_check.py *)",
+      "Bash(.venv/bin/python tools/mobile_check.py:*)",
       "Bash(.venv/bin/python -m pytest -q tests)",
       "Bash(.venv/bin/python dev/smoke.py)",
       "Bash(.venv/bin/python dev/smoke.py *)",
